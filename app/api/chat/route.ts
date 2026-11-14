@@ -25,7 +25,7 @@ const fail = (error: string, status: number, extra: Record<string, unknown> = {}
 
 const chatModel = (): ChatModel => {
   const m = process.env.CHAT_MODEL;
-  return m && m in PRICES ? (m as ChatModel) : "claude-sonnet-5-5";
+  return m && m in PRICES ? (m as ChatModel) : "claude-haiku-5-5"; // the cheap tier by default; CHAT_MODEL can raise it
 };
 
 const BUDGET_STATUS = { busy: 409, answers: 429, site: 429, unavailable: 503 } as const;

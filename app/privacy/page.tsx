@@ -143,6 +143,17 @@ export default function Privacy() {
             Anthropic, whose Claude models write the guide. Nothing about you is sent with them.
           </li>
         )}
+        {PRO && (
+          <li>
+            <strong>Deep Inspection</strong> (Pro): to inspect a public repo, gitmanual&apos;s servers download it from GitHub at its latest
+            commit, check its files in memory (nothing is stored once the report is made) and look it up on{" "}
+            <a href="https://scorecard.dev">OpenSSF Scorecard</a>, <a href="https://osv.dev">OSV.dev</a>, <a href="https://deps.dev">deps.dev</a> and
+            the npm, PyPI and crates.io download counters. They then send its README, license, setup docs, settings examples and the list of its
+            file names to Anthropic&apos;s Claude to write the summary. Only the repo&apos;s name and public files are sent; nothing about you. If
+            the scan finds what looks like a key in the code, the report shows only its first four characters. The report is saved and shared
+            with every Pro member who opens it; we also count how many inspections each account runs a day.
+          </li>
+        )}
         {CHAT && (
           <li>
             <strong>GitManual AI Agent</strong>: questions you ask in &ldquo;Ask about this repo&rdquo; are sent with the repo&apos;s public

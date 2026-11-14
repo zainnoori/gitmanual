@@ -84,9 +84,9 @@ test("free: one new guide a day, its real cost recorded; saved guides stay free 
   assert.match(first.text, /npm install/);
   assert.equal(calls, 1);
 
-  // 1,000 tokens in and 500 out on Opus 5.5 ($4 and $20 per million) is $0.014.
+  // 1,000 tokens in and 500 out on Haiku 5.5 ($0.10 and $0.50 per million) is $0.00035.
   const { rows } = await strictly((c) => c.execute("SELECT pool, status, cost FROM chat_spend WHERE account = '1'"));
-  assert.deepEqual(rows.map((r) => [r.pool, r.status, Number(r.cost)]), [["guide", "settled", 14000]]);
+  assert.deepEqual(rows.map((r) => [r.pool, r.status, Number(r.cost)]), [["guide", "settled", 350]]);
 
   const second = await write("a/two");
   assert.equal(second.status, 429);

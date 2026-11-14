@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { ChatStats } from "@/lib/budget";
 import type { InterestStats } from "@/lib/db";
 
-type Stats = ChatStats & { logins: Record<string, string | null>; pdfInterest: InterestStats; downloads: { md: number; pdf: number }; teamWaitlist: number; guides: { day: string; guides: number; people: number; spent: number }[] };
+type Stats = ChatStats & { logins: Record<string, string | null>; pdfInterest: InterestStats; inspectionInterest?: InterestStats; downloads: { md: number; pdf: number }; teamWaitlist: number; guides: { day: string; guides: number; people: number; spent: number }[] };
 
 const usd = (n: number, digits = 2) => `$${n.toFixed(digits)}`;
 const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
@@ -50,7 +50,7 @@ export function ChatAdmin() {
 
       <h2>Written guides</h2>
       <p>
-        &ldquo;Write my guide&rdquo; on Opus: 1 new guide a day per free account, 20 with Pro; saved guides are free to read and not counted.
+        &ldquo;Write my guide&rdquo; on Haiku: 1 new guide a day per free account, 20 with Pro; saved guides are free to read and not counted.
         Last 14 days: <strong>{stats.guides.reduce((n, d) => n + d.guides, 0).toLocaleString()}</strong> guides,{" "}
         <strong>{usd(stats.guides.reduce((n, d) => n + d.spent, 0))}</strong>.
       </p>
@@ -103,6 +103,24 @@ export function ChatAdmin() {
           </>
         )}
       </p>
+      {stats.inspectionInterest && (
+        <p>
+          Signed-in members without Pro who opened a Deep Inspection (each counts once per repo a day). Last 30 days:{" "}
+          <strong>{stats.inspectionInterest.total.toLocaleString()}</strong>
+          {stats.inspectionInterest.repos.length > 0 && (
+            <>
+              . Top repos:{" "}
+              {stats.inspectionInterest.repos.map((r, i) => (
+                <span key={r.repo}>
+                  {i > 0 && ", "}
+                  <a href={`/${r.repo}/inspection`}>{r.repo}</a> ({r.clicks})
+                </span>
+              ))}
+            </>
+          )}
+          .
+        </p>
+      )}
 
       <h2>By day</h2>
       {stats.days.length ? (

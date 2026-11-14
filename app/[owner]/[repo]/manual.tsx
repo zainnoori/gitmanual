@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect } from "next/navigation";
+import { PRO_ENABLED } from "@/lib/stripe";
 import { cache } from "react";
 import { alternativesFor, getVotes, type Alternative } from "@/lib/db";
 import { answered, asked, beforeYouStart } from "@/lib/facts";
@@ -141,6 +142,7 @@ export async function RepoManual({ params, searchParams }: Props) {
         curator={PICKS.curator}
         aiGuide={Boolean(process.env.ANTHROPIC_API_KEY)}
         chat={process.env.CHAT_ENABLED === "on" && Boolean(process.env.ANTHROPIC_API_KEY)}
+        inspection={PRO_ENABLED()}
         alternatives={"data" in r ? await alternatives(r.data) : {}}
         related={"data" in r ? await related(r.data) : {}}
       />
