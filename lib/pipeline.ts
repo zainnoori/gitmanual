@@ -6,9 +6,10 @@ import { announceRepo } from "./indexnow";
 import { parseRelease, readmeInstallCommands, type InstallOptions } from "./install";
 import { OS_LIST } from "./os";
 import { declaredPlatforms, mentions } from "./platforms";
+import { platformFiles, platformOnly } from "./platform";
 
 // Bump when the analysis output changes shape or rules, so saved copies are re-analyzed instead of shown.
-const VERSION = 12;
+const VERSION = 13; // 13: "made for one system" (lib/platform.ts) in the will-it-work answer
 
 export type RepoData = {
   version: number;
@@ -77,6 +78,8 @@ async function analyzeRepo(ref: RepoRef, token?: string): Promise<RepoData> {
   const docs = findSetupDocs(entries);
   const docEntry = docs[0] && entries.find((e) => e.path === docs[0].path);
   const files = await getFiles(ref, branch, [...selectFiles(entries), ...(docEntry ? [docEntry] : [])], token);
+  // Project files that say which system the code is written for: read only for that check, not kept with the manual.
+  const platformExtra = await getFiles(ref, branch, platformFiles(entries).filter((e) => !(e.path in files)), token).catch(() => ({}) as Record<string, string>);
   const [owner, name] = meta.fullName.split("/");
   const analysis = analyze({ owner, repo: name }, files, presentPaths(entries), entries.map((e) => e.path), meta.language, meta.description);
 
@@ -109,6 +112,16 @@ async function analyzeRepo(ref: RepoRef, token?: string): Promise<RepoData> {
     ),
     downloadPage,
   };
+  // Made for one system: unless the README already says which ones aren't supported.
+  if (!install.declared)
+    install.only = platformOnly({
+      description: meta.description,
+      readme,
+      paths: entries.map((e) => e.path),
+      files: { ...platformExtra, ...Object.fromEntries(Object.entries(files).filter(([p]) => /^\.github\/workflows\/|(^|\/)(Cargo\.toml|Package\.swift|meson\.build|CMakeLists\.txt|configure\.ac)$|\.(cs|vb|fs)proj$/.test(p))) },
+      release,
+      language: meta.language,
+    });
   const docsLink = findDocsLink(readme, { name, website: meta.homepage });
   const guides: Guides = {
     website: meta.homepage,
