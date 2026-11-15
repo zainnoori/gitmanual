@@ -26,6 +26,22 @@ export function fitCheck(a: Analysis, install: InstallOptions, os: OS, arch: Arc
     return { status: "no", headline: `Not supported on ${name}`, reasons };
   }
 
+  // Made for another system: building it yourself won't change what the code is written for.
+  const only = install.only;
+  if (only && only.os !== os) {
+    const other = OS_LABEL[only.os];
+    // In plain words, without file paths: "it describes itself as made for Windows, its Rust code uses Windows
+    // system libraries, and its releases only have Windows downloads".
+    const said = only.signals.map((x) => x.replace(/\s*\([^)]*\)$/, "")).slice(0, 3);
+    reasons.push(`It's made for ${other}: ${said.length > 1 ? `${said.slice(0, -1).join(", ")} and ${said.at(-1)}` : said[0]}.`);
+    if (only.sure) {
+      reasons.push(`Its code uses ${other.endsWith("s") ? `${other}'` : `${other}'s`} own system features, so building it yourself won't make it run on ${name}.`);
+      return { status: "no", headline: `Made for ${other} only`, reasons };
+    }
+    reasons.push(`Check the README for ${name} support before trying it.`);
+    return { status: "maybe", headline: `Probably ${other} only`, reasons };
+  }
+
   if (os !== "mac" && a.hints.some((h) => h.startsWith("Built on Apple's MLX"))) {
     reasons.push("It's built on Apple's MLX, which is made for Apple Silicon Macs. Check the README for Windows or Linux support before installing.");
     return { status: "maybe", headline: `Made for Apple Silicon Macs`, reasons };

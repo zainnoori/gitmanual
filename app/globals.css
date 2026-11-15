@@ -1899,3 +1899,4 @@ a.insp-ev:hover { color: var(--ink); }
   .sheet.sheet-source .parts { order: 1; }
   .sheet > .sheet-side > :not(.parts) { order: 4; }
 }
+.made-for { margin: 0 0 14px; padding: 12px 16px; border-color: color-mix(in srgb, var(--no) 60%, var(--line)); background: color-mix(in srgb, var(--no) 8%, var(--sheet)); font-size: var(--fs-small); }

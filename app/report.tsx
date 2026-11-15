@@ -440,6 +440,8 @@ function Report({
   const steps = a.steps[os];
   const myArch = os === detectedOs ? arch : null;
   const fit = fitCheck(a, install, os, myArch, meta.archived);
+  // Made for another system (lib/platform.ts): the page points there instead of at a build that can't work here.
+  const madeFor = install.only?.sure && install.only.os !== os ? install.only.os : null;
   // "More like this" leaves out what the alternatives box above already shows.
   const altsShown = fit.status !== "yes" ? (alternatives[os] ?? []).map((r) => r.fullName) : [];
   const moreLike = (related[os] ?? []).filter((r) => !altsShown.includes(r.fullName));
@@ -613,6 +615,8 @@ function Report({
         way={installWay(install, os)}
         steps={steps.length}
         analysis={a}
+        madeFor={madeFor}
+        onOs={onOs}
         onGo={(id, m) => {
           if (m) onMode(m);
           requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }));
@@ -637,6 +641,8 @@ function Report({
             <InstallPanel
               install={install}
               os={os}
+              madeFor={madeFor}
+              onOs={onOs}
               onSource={() => onMode("source")}
               repoName={meta.fullName.split("/")[1]}
               python={a.pythonPackage}
@@ -644,6 +650,14 @@ function Report({
             />
           ) : (
             <>
+              {madeFor && (
+                <p className="panel made-for">
+                  <b>Made for {OS_LABEL[madeFor]} only.</b> These steps build it, but the result only runs on {OS_LABEL[madeFor]}.{" "}
+                  <button className="link" onClick={() => onOs(madeFor)}>
+                    See the {OS_LABEL[madeFor]} setup
+                  </button>
+                </p>
+              )}
               <RepoScript meta={meta} guides={guides} os={os} />
               {guides.doc && (
                 <details className="panel guide-doc" id="maintainer-guide" open={steps.length <= 3}>
@@ -924,6 +938,8 @@ function Report({
 function InstallPanel({
   install,
   os,
+  madeFor,
+  onOs,
   onSource,
   repoName,
   python,
@@ -931,6 +947,8 @@ function InstallPanel({
 }: {
   install: InstallOptions;
   os: OS;
+  madeFor?: OS | null;
+  onOs?: (os: OS) => void;
   onSource: () => void;
   repoName: string;
   python?: Analysis["pythonPackage"];
@@ -991,6 +1009,19 @@ function InstallPanel({
     </div>
   );
 
+  if (madeFor && !assets.length && !commands.length && !page)
+    return (
+      <div className="panel">
+        <h3>Made for {OS_LABEL[madeFor]} only</h3>
+        <p className="empty">
+          There&apos;s no {OS_LABEL[os]} version, and building it yourself won&apos;t change that: its code uses {OS_LABEL[madeFor]}
+          {OS_LABEL[madeFor].endsWith("s") ? "\u2019" : "\u2019s"} own system features.
+        </p>
+        <button className="btn btn-sm" onClick={() => onOs?.(madeFor)}>
+          See the {OS_LABEL[madeFor]} setup →
+        </button>
+      </div>
+    );
   if (!assets.length && !commands.length && !page) {
     return (
       <>
@@ -1661,6 +1692,8 @@ function StartHere({
   steps,
   analysis: a,
   onGo,
+  madeFor,
+  onOs,
 }: {
   meta: Result["meta"];
   guides: Guides;
@@ -1669,11 +1702,19 @@ function StartHere({
   steps: number;
   analysis: Analysis;
   onGo: (id: string, mode?: Mode) => void;
+  madeFor?: OS | null;
+  onOs?: (os: OS) => void;
 }) {
   // Our steps are thin when we found little more than "clone it"; the project's own site is the better start then.
   // The maintainers' own guide or docs site beats our generated steps when there's no one-step install.
-  const best = way ? "install" : guides.doc ? "guide" : guides.docs ? "docs" : guides.website && (steps <= 2 || /^https?:\/\/docs\./.test(guides.website)) ? "website" : "steps";
-  const all: Door[] = [
+  const best = madeFor ? "switch" : way ? "install" : guides.doc ? "guide" : guides.docs ? "docs" : guides.website && (steps <= 2 || /^https?:\/\/docs\./.test(guides.website)) ? "website" : "steps";
+  const all: Door[] = madeFor
+    ? [
+        // Made for another system: the only useful start is that system's page, and the project's site.
+        { id: "switch", tag: `Made for ${OS_LABEL[madeFor]}`, title: `See the ${OS_LABEL[madeFor]} setup`, sub: `It doesn't run on ${OS_LABEL[os]}.`, go: () => onOs?.(madeFor) },
+        ...(guides.website ? [{ id: "website", tag: "Website ↗", title: host(guides.website), sub: "The project's own site.", href: guides.website }] : []),
+      ]
+    : [
     ...(way ? [{ id: "install", ...way, go: () => onGo("main-tabs", "install") }] : []),
     ...(guides.doc
       ? [{ id: "guide", tag: "Setup guide", title: `Read the maintainers' ${guides.doc.label.toLowerCase()}`, sub: guides.doc.path, go: () => onGo("maintainer-guide", "source") }]
