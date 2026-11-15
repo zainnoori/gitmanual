@@ -12,9 +12,9 @@ import { PRO_ENABLED } from "@/lib/stripe";
 import { viewer } from "@/lib/viewer";
 
 // "Write my guide": a step-by-step guide written by Claude for one repo and system, saved for everyone once written.
-// Reading a saved guide is free and needs nothing. Writing a new one costs real money (Opus), so it needs GitHub
+// Reading a saved guide is free and needs nothing. Writing a new one costs real money (Claude), so it needs GitHub
 // sign-in: one a day on the free plan, up to 20 with Pro, paid for from a budget with a daily cap (lib/budget.ts).
-const MODEL = "claude-opus-5-5" as const;
+const MODEL = "claude-haiku-5-5" as const; // the cheap tier; the guide builds on the rule-based analysis it's given
 const MAX_OUTPUT = 16000;
 
 const MAX_FILE_CHARS = 12_000;
@@ -158,9 +158,7 @@ Write the setup guide.`;
         const stream = client.beta.messages.stream({
           model: MODEL,
           max_tokens: MAX_OUTPUT,
-          output_config: { effort: "low" },
-          betas: ["server-side-fallback-2026-07-01"],
-          fallbacks: "default",
+          output_config: { effort: "medium" }, // Haiku has no server-side fallback
           system: SYSTEM,
           messages: [{ role: "user", content: prompt }],
         });

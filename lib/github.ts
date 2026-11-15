@@ -86,6 +86,55 @@ async function gh<T>(path: string, token?: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// For Deep Inspection (lib/inspection): a GitHub REST answer without throwing, so one missing piece (a 404, GitHub
+// still computing statistics with a 202, a refusal) leaves that part of the report out instead of failing it all.
+// How many items a list endpoint has, from the last page number in its Link header (asking for one per page).
+export async function ghCount(path: string): Promise<number | null> {
+  try {
+    const res = await fetchRetry(`https://api.github.com${path}${path.includes("?") ? "&" : "?"}per_page=1`, { headers: headers(), cache: "no-store", signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) return null;
+    const last = /[?&]page=(\d+)>;\s*rel="last"/.exec(res.headers.get("link") ?? "");
+    if (last) return Number(last[1]);
+    const body = (await res.json()) as unknown[];
+    return Array.isArray(body) ? body.length : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function ghApi<T>(path: string, opts: { accept?: string; timeoutMs?: number } = {}): Promise<{ status: number; data: T | null }> {
+  try {
+    const res = await fetchRetry(`https://api.github.com${path}`, {
+      headers: headers(undefined, opts.accept),
+      cache: "no-store",
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+    });
+    if (!res.ok || res.status === 202 || res.status === 204) return { status: res.status, data: null };
+    return { status: res.status, data: (await res.json()) as T };
+  } catch {
+    return { status: 0, data: null };
+  }
+}
+
+// GitHub's GraphQL API, which needs the site's token. Null when there's no token or GitHub answers with errors.
+export async function ghGraphql<T>(query: string, variables: Record<string, unknown>, timeoutMs = 15_000): Promise<T | null> {
+  if (!process.env.GITHUB_TOKEN) return null;
+  try {
+    const res = await fetchRetry("https://api.github.com/graphql", {
+      method: "POST",
+      headers: { ...headers(), "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { data?: T; errors?: unknown };
+    return j.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getRepoMeta({ owner, repo }: RepoRef, token?: string): Promise<RepoMeta> {
   const r = await gh<any>(`/repos/${owner}/${repo}`, token);
   return {

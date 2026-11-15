@@ -35,10 +35,13 @@ export type Pool = { answersPerDay: number; inProgress: number; dailyUsd: number
 export const POOLS = {
   user: { answersPerDay: 10, inProgress: 1, dailyUsd: 5 },
   pro: { answersPerDay: 150, inProgress: 1, dailyUsd: 25 },
-  // "Write my guide" (app/api/guide): new written guides, on Opus. Reading a saved guide costs nothing and isn't
+  // "Write my guide" (app/api/guide): new written guides, on Haiku. Reading a saved guide costs nothing and isn't
   // counted. Free accounts write one a day, Pro up to 20; each pool has its own daily cap for the whole site.
   guide: { answersPerDay: 1, inProgress: 1, dailyUsd: 5 },
   guidePro: { answersPerDay: 20, inProgress: 1, dailyUsd: 10 },
+  // Deep Inspection (Pro): each new or refreshed report reads GitHub and other services and asks Claude (Haiku) to word the
+  // findings. A saved report is free to reopen; 50 new ones a day per account, with the site's own daily cap.
+  inspection: { answersPerDay: 50, inProgress: 2, dailyUsd: 20 },
 } satisfies Record<string, Pool>;
 
 export type PoolName = keyof typeof POOLS;

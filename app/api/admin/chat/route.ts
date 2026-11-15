@@ -18,17 +18,18 @@ export async function GET() {
   const { user } = await viewer();
   if (!user || !isAdmin(user.login)) return NextResponse.json({ error: "Admins only." }, { status: 403, headers: NO_STORE });
   try {
-    const [stats, pdfInterest, mdDownloads, pdfDownloads, team] = await Promise.all([
+    const [stats, pdfInterest, mdDownloads, pdfDownloads, team, inspectionInterest] = await Promise.all([
       chatStats(),
       interestStats("pdf"),
       interestStats("md-download"),
       interestStats("pdf-download"),
       interestStats("team"),
+      interestStats("inspection"),
     ]);
     const guides = await guideStats();
     const ids = [...new Set(stats.atLimit.map((a) => a.account))].slice(0, 30);
     const logins = Object.fromEntries(await Promise.all(ids.map(async (id) => [id, await login(id)] as const)));
-    return NextResponse.json({ ...stats, logins, pdfInterest, downloads: { md: mdDownloads.total, pdf: pdfDownloads.total }, teamWaitlist: team.total, guides }, { headers: NO_STORE });
+    return NextResponse.json({ ...stats, logins, pdfInterest, inspectionInterest, downloads: { md: mdDownloads.total, pdf: pdfDownloads.total }, teamWaitlist: team.total, guides }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ error: "The database isn't reachable right now." }, { status: 503, headers: NO_STORE });
   }

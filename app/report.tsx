@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { Analysis } from "@/lib/detect";
@@ -18,8 +19,13 @@ import { proUrl } from "@/lib/site";
 // import { FlowMap } from "./flow"; — the route diagram, off the page for now
 import { disconnect, fetchPrivate, PrivateAccess } from "./private";
 import { CarbonAd } from "./carbon";
+import { ArchitectureDiagram } from "./inspection-charts";
+import { SevIcon } from "./sev-icon";
+import { GitHubMark } from "./github-mark";
+import type { Inspection } from "@/lib/inspection/types";
+import { BUCKETS, bucketOf, fixFirst, triage, verdict } from "@/lib/inspection/labels";
 import { Chat } from "./chat";
-import { CodeBlock, CopyButton, RepoForm, Wrenches, detectArch, detectOS } from "./ui";
+import { CodeBlock, CopyButton, RepoForm, Wrenches, detectArch, detectOS, isPhone } from "./ui";
 
 type Result = {
   meta: {
@@ -152,10 +158,13 @@ export function ReportView({
   curator = "",
   aiGuide = false,
   chat = false,
+  inspection = false,
   osPage = null,
   alternatives = {},
   related = {},
 }: {
+  // The "Deep Inspection" card (Pro) only shows when Pro is on for this site.
+  inspection?: boolean;
   // Similar repos that run on the systems this one doesn't (see manual.tsx).
   alternatives?: Partial<Record<OS, Alternative[]>>;
   // Similar repos that run on each system, shown on every manual (see manual.tsx).
@@ -188,6 +197,8 @@ export function ReportView({
   const [guideStatus, setGuideStatus] = useState<GuideStatus | null>(null);
   const [os, setOs] = useState<OS>(initialOs);
   const [detectedOs, setDetectedOs] = useState<OS | null>(null);
+  // On a phone or tablet: there's no computer to detect (an iPhone isn't macOS), so nothing is marked "you".
+  const [phone, setPhone] = useState(false);
   const [arch, setArch] = useState<Arch | null>(null);
   const [mode, setMode] = useState<Mode>(initialMode ?? (initial ? defaultMode(initial) : "source"));
   const [refresh, setRefresh] = useState(0);
@@ -197,11 +208,13 @@ export function ReportView({
 
   useEffect(() => {
     const d = detectOS();
-    setDetectedOs(d);
-    detectArch().then(setArch);
+    const onPhone = isPhone();
+    setPhone(onPhone);
+    setDetectedOs(onPhone ? null : d);
+    if (!onPhone) detectArch().then(setArch);
     const q = new URLSearchParams(window.location.search);
     const qOs = q.get("os") as OS | null;
-    setOs(osPage ?? (qOs && OS_LIST.includes(qOs) ? qOs : d));
+    setOs(osPage ?? (qOs && OS_LIST.includes(qOs) ? qOs : onPhone ? initialOs : d));
     const qMode = q.get("mode");
     if (refresh === 0 && (initial || initialError)) return;
 
@@ -342,6 +355,7 @@ export function ReportView({
       result={result}
       os={os}
       detectedOs={detectedOs}
+      phone={phone}
       arch={arch}
       onOs={setOs}
       mode={mode}
@@ -352,6 +366,7 @@ export function ReportView({
       onGuide={generateGuide}
       picks={picks}
       curator={curator}
+      inspection={inspection}
       aiGuide={aiGuide}
       // Chat always reads the default branch, so it isn't offered on a branch's page.
       chat={chat && !gitRef}
@@ -374,6 +389,7 @@ function Report({
   result,
   os,
   detectedOs,
+  phone,
   arch,
   onOs,
   mode,
@@ -389,10 +405,12 @@ function Report({
   curator,
   aiGuide,
   chat,
+  inspection,
   osPage,
   alternatives,
   related,
 }: {
+  inspection: boolean;
   alternatives: Partial<Record<OS, Alternative[]>>;
   related: Partial<Record<OS, Alternative[]>>;
   picks: Pick[];
@@ -403,6 +421,7 @@ function Report({
   result: Result;
   os: OS;
   detectedOs: OS | null;
+  phone: boolean;
   arch: Arch | null;
   onOs: (os: OS) => void;
   mode: Mode;
@@ -554,7 +573,7 @@ function Report({
           )}
         </div>
         <div className="fit-device">
-          <span className="eyebrow">Your system</span>
+          <span className="eyebrow">{phone ? "Pick your computer" : "Your system"}</span>
           <div className="seg" role="radiogroup" aria-label="Operating system">
             {OS_LIST.map((o) => (
               // Real links, so search engines find each system's page; clicking just switches in place.
@@ -574,7 +593,7 @@ function Report({
               </a>
             ))}
           </div>
-          {myArch && <span className="note">Your chip: {archLabel(myArch, os)}</span>}
+          {phone ? <span className="note">On a phone: choose the computer you&apos;ll install it on.</span> : myArch && <span className="note">Your chip: {archLabel(myArch, os)}</span>}
         </div>
       </section>
 
@@ -601,7 +620,7 @@ function Report({
       />
       {/* <FlowMap flow={flow} onJump={...} /> — the route diagram, see the note on `flow` above. */}
 
-      <div className="sheet">
+      <div className={`sheet sheet-${mode}`}>
         <div className="sheet-main">
           <div className="tabs" role="tablist" aria-label="How to set it up" id="main-tabs">
             <button role="tab" aria-selected={mode === "install"} className={mode === "install" ? "on" : ""} onClick={() => onMode("install")}>
@@ -729,6 +748,8 @@ function Report({
 
           {chat && !priv && <Chat repo={meta.fullName} os={os} />}
 
+          {inspection && !priv && <ManualArchitecture repo={meta.fullName} />}
+
           {aiGuide && !priv && (
             <div className="panel ai">
               <div className="panel-head">
@@ -760,11 +781,12 @@ function Report({
         </div>
 
         <aside className="sheet-side">
+          {inspection && !priv && <InspectionCard repo={meta.fullName} />}
+          {/* Hidden when there's nothing to list: no parts to install and no settings. */}
+          {(parts.length > 0 || a.envVars.length > 0) && (
           <div className="parts" id="parts">
             <h2 className="parts-h">Parts list</h2>
-            {parts.length === 0 ? (
-              <p className="empty">Nothing extra to install.</p>
-            ) : (
+            {parts.length > 0 && (
               <ul>
                 {parts.map((p) => (
                   <li key={`${p.kind}-${p.name}`}>
@@ -794,6 +816,7 @@ function Report({
               </details>
             )}
           </div>
+          )}
 
           {!priv && <Contributors fullName={meta.fullName} htmlUrl={meta.htmlUrl} />}
 
@@ -1386,11 +1409,157 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
   );
 }
 
-function GitHubMark() {
+// "How it fits together" on the manual (Pro): the diagram from the saved Deep Inspection, never a new one, so the free
+// manual adds no Claude cost. Pro members without a report get a way to make one; everyone else a locked preview.
+// The saved Deep Inspection for this repo, fetched once for the card and the diagram together. Reading it is free
+// and never starts a new inspection.
+type Saved = { signedIn: boolean; pro: boolean; inspection: Inspection | null };
+const savedCache = new Map<string, Promise<Saved | null>>();
+function useSavedInspection(repo: string): Saved | null {
+  const [state, setState] = useState<Saved | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (!savedCache.has(repo))
+      savedCache.set(
+        repo,
+        fetch(`/api/inspection?repo=${encodeURIComponent(repo)}`, { cache: "no-store" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => (j ? { signedIn: Boolean(j.signedIn), pro: Boolean(j.pro), inspection: j.inspection ?? null } : null))
+          .catch(() => null),
+      );
+    savedCache.get(repo)!.then((v) => live && setState(v));
+    return () => {
+      live = false;
+    };
+  }, [repo]);
+  return state;
+}
+
+// The Deep Inspection card beside the manual. With a saved report (Pro): the verdict, every check counted by how
+// much it matters, and what to look at first, with the full report a click away. Otherwise: what it is, and the way in.
+function InspectionCard({ repo }: { repo: string }) {
+  const state = useSavedInspection(repo);
+  const r = state?.pro ? state.inspection : null;
+  if (!r) return <InspectionTeaser repo={repo} pro={Boolean(state?.pro)} />;
+  return <InspectionPreview repo={repo} r={r} />;
+}
+
+// The same card, greyed out, for anyone without a report to show: a sketch of what the preview holds (no real
+// findings, those are Pro), and the whole card leads to the inspection page.
+function InspectionTeaser({ repo, pro }: { repo: string; pro: boolean }) {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-    </svg>
+    <Link className="side-card insp-preview insp-teaser" href={`/${repo}/inspection`} aria-label={pro ? "Inspect this repo with Deep Inspection" : "See what Deep Inspection shows for this repo"}>
+      <p className="insp-preview-top">
+        <span className="insp-pro">Pro</span> Deep Inspection
+      </p>
+      <strong className="insp-teaser-title">What the README leaves out</strong>
+      <span className="insp-preview-counts">Check for missing setup steps, undocumented settings, license concerns, exposed secrets, and known dependency vulnerabilities.</span>
+      <span className="insp-sevbar small" aria-hidden="true">
+        <span className="sb-seg" style={{ flexGrow: 1 }} />
+        <span className="sb-seg" style={{ flexGrow: 3 }} />
+        <span className="sb-seg" style={{ flexGrow: 8 }} />
+      </span>
+      <span className="insp-teaser-lines" aria-hidden="true">
+        <i style={{ width: "86%" }} />
+        <i style={{ width: "64%" }} />
+        <i style={{ width: "74%" }} />
+      </span>
+      <span className="insp-teaser-pitch">See what needs attention before you invest time in this repo.</span>
+      <span className="btn insp-preview-go">{pro ? "Inspect this repo →" : "Unlock Deep Inspection →"}</span>
+    </Link>
+  );
+}
+
+export function InspectionPreview({ repo, r }: { repo: string; r: Inspection }) {
+  const v = verdict(r);
+  const t = triage(r);
+  const first = fixFirst(r, 3);
+  const urgent = t.blocker + t.important;
+  const segs = BUCKETS.filter((b) => b.id !== "info" && t[b.id] > 0);
+  return (
+    <section className="side-card insp-preview" aria-labelledby="insp-prev-h">
+      <p className="insp-preview-top">
+        <span className="insp-pro">Pro</span> Deep Inspection
+      </p>
+      <h2 id="insp-prev-h" className={`insp-preview-call v-${v.tone}`}>
+        <SevIcon kind={v.tone === "no" ? "blocker" : v.tone === "maybe" ? "important" : "pass"} size={18} />
+        {v.title}
+      </h2>
+      <div className="insp-sevbar small" role="img" aria-label={segs.map((b) => `${t[b.id]} ${b.label.toLowerCase()}`).join(", ")}>
+        {segs.map((b) => (
+          <span key={b.id} className={`sb-seg b-${b.id}`} style={{ flexGrow: t[b.id] }} />
+        ))}
+      </div>
+      <p className="insp-preview-counts">
+        {segs.map((b) => `${t[b.id]} ${b.short.toLowerCase()}`).join(" · ")}
+      </p>
+      {first.length > 0 && (
+        <>
+          <h3>{urgent ? "Look at these first" : "Worth a look"}</h3>
+          <ul>
+            {first.map((x) => (
+              <li key={x.id}>
+                <SevIcon kind={bucketOf(x)} size={14} />
+                <span>{x.title}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <Link className="btn btn-go insp-preview-go" href={`/${repo}/inspection`}>
+        Open the full report →
+      </Link>
+    </section>
+  );
+}
+
+function ManualArchitecture({ repo }: { repo: string }) {
+  const state = useSavedInspection(repo);
+  if (!state) return null;
+  const name = repo.split("/")[1];
+  const arch = state.inspection?.architecture;
+  if (state.pro && arch && arch.parts.length >= 2)
+    return (
+      <section className="man-arch" aria-labelledby="man-arch-h">
+        <div className="man-arch-head">
+          <h2 id="man-arch-h">How it fits together</h2>
+          <Link href={`/${repo}/inspection`} className="man-arch-link">
+            Full Deep Inspection →
+          </Link>
+        </div>
+        <p className="note">{arch.summary}</p>
+        <ArchitectureDiagram report={state.inspection!} />
+      </section>
+    );
+  return (
+    <section className="man-arch locked" aria-labelledby="man-arch-h">
+      <div className="man-arch-sketch" aria-hidden="true">
+        <svg viewBox="0 0 640 170" width="100%">
+          {[[20, 60], [240, 20], [240, 100], [460, 60]].map(([x, y]) => (
+            <rect key={`${x}-${y}`} x={x} y={y} width={160} height={52} rx={12} />
+          ))}
+          <path d="M180 86 C210 86 210 46 240 46 M180 86 C210 86 210 126 240 126 M400 46 C430 46 430 86 460 86 M400 126 C430 126 430 86 460 86" />
+        </svg>
+      </div>
+      <div className="man-arch-lock">
+        <h2 id="man-arch-h">See how {name} fits together</h2>
+        <p>A diagram of its parts (app, server, database, outside services) and how they talk to each other, from its own files.</p>
+        {/* Signed out: sign in first (it comes back here), then Pro; the same order as the PDF and Deep Inspection. */}
+        {state.pro ? (
+          <Link className="btn" href={`/${repo}/inspection`}>
+            Inspect this repo
+          </Link>
+        ) : state.signedIn ? (
+          <a className="btn" href={proUrl(`/${repo}/inspection`)}>
+            Get Pro to see it
+          </a>
+        ) : (
+          <a className="btn" href={`/api/github/connect?signin=1&back=${encodeURIComponent(`/${repo}#man-arch-h`)}`}>
+            <GitHubMark /> Sign in to see it
+          </a>
+        )}
+      </div>
+    </section>
   );
 }
 

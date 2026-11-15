@@ -62,6 +62,9 @@ const DEV_FILE = /(^|\/)(examples?|samples?|demos?|tests?|e2e|fixtures|playgroun
 const named = (vars: EnvVar[], table: [RegExp, string][]) => [
   ...new Set(vars.flatMap((v) => table.find(([rx]) => rx.test(v.name.toUpperCase()))?.[1] ?? [])),
 ];
+// The paid AI services a repo's settings have keys for (Deep Inspection's "what it costs to run").
+export const paidAiServices = (envVars: EnvVar[]) => named(envVars.filter((v) => !DEV_FILE.test(v.source)), AI);
+
 const or = (names: string[]) => (names.length < 3 ? names.join(" or ") : `${names.slice(0, -1).join(", ")} or ${names.at(-1)}`);
 
 function ago(iso: string): { days: number; text: string } {

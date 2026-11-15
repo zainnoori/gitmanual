@@ -9,6 +9,15 @@ import type { Arch } from "@/lib/install";
 import type { OS } from "@/lib/os";
 import { AD_FREE_COOKIE } from "@/lib/site";
 
+// Phones and tablets: people reading about a repo they'll install later on a computer.
+export function isPhone(): boolean {
+  const nav = navigator as Navigator & { userAgentData?: { mobile?: boolean } };
+  if (nav.userAgentData?.mobile) return true;
+  const ua = navigator.userAgent;
+  // iPadOS asks for desktop pages and calls itself a Mac; touch points give it away.
+  return /iphone|ipod|ipad|android|windows phone|mobile/i.test(ua) || (/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+}
+
 export function detectOS(): OS {
   const nav = navigator as Navigator & { userAgentData?: { platform?: string } };
   const p = `${nav.userAgentData?.platform ?? ""} ${navigator.platform} ${navigator.userAgent}`.toLowerCase();

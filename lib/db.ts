@@ -122,6 +122,18 @@ const SCHEMA = `
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL     -- deleted after this; nothing about a chat is kept longer
   );
+  CREATE TABLE IF NOT EXISTS inspections (
+    key TEXT PRIMARY KEY,           -- lower-case owner/repo
+    version INTEGER NOT NULL,       -- lib/inspection VERSION: an older report is rebuilt
+    data TEXT NOT NULL,             -- JSON: the whole report (facts, findings, headline, grades, summary)
+    scanned_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS inspection_snapshots (
+    key TEXT NOT NULL,              -- lower-case owner/repo
+    scanned_at INTEGER NOT NULL,
+    data TEXT NOT NULL,             -- JSON: a few headline numbers, for trends over time
+    PRIMARY KEY (key, scanned_at)
+  );
 `;
 
 // One connection per server process. Kept on globalThis because dev hot reloads re-run this module,
@@ -887,4 +899,27 @@ export async function interestStats(feature: string, days = 30, now = Date.now()
     const list = byDay.rows.map((r) => ({ day: String(r.day), clicks: Number(r.clicks) }));
     return { total: list.reduce((n, d) => n + d.clicks, 0), days: list, repos: byRepo.rows.map((r) => ({ repo: String(r.repo), clicks: Number(r.clicks) })) };
   });
+}
+
+// Deep Inspection reports (lib/inspection), one per repo, shared by every Pro member who opens it.
+export function getInspection(key: string): Promise<{ version: number; data: unknown; scannedAt: number } | null> {
+  return safely(null, async (c) => {
+    const r = (await c.execute({ sql: "SELECT version, data, scanned_at FROM inspections WHERE key = ?", args: [key] })).rows[0];
+    return r ? { version: Number(r.version), data: JSON.parse(String(r.data)), scannedAt: Number(r.scanned_at) } : null;
+  });
+}
+
+export function saveInspection(key: string, version: number, data: unknown, scannedAt: number, snapshot: unknown): Promise<unknown> {
+  return safely(null, (c) =>
+    c.batch(
+      [
+        {
+          sql: "INSERT INTO inspections (key, version, data, scanned_at) VALUES (?, ?, ?, ?) ON CONFLICT (key) DO UPDATE SET version = excluded.version, data = excluded.data, scanned_at = excluded.scanned_at",
+          args: [key, version, JSON.stringify(data), scannedAt],
+        },
+        { sql: "INSERT OR IGNORE INTO inspection_snapshots (key, scanned_at, data) VALUES (?, ?, ?)", args: [key, scannedAt, JSON.stringify(snapshot)] },
+      ],
+      "write",
+    ),
+  );
 }
