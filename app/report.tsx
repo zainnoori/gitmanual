@@ -25,7 +25,7 @@ import { GitHubMark } from "./github-mark";
 import type { Inspection } from "@/lib/inspection/types";
 import { BUCKETS, bucketOf, fixFirst, triage, verdict } from "@/lib/inspection/labels";
 import { Chat } from "./chat";
-import { CodeBlock, CopyButton, RepoForm, Wrenches, detectArch, detectOS } from "./ui";
+import { CodeBlock, CopyButton, RepoForm, Wrenches, detectArch, detectOS, isPhone } from "./ui";
 
 type Result = {
   meta: {
@@ -197,6 +197,8 @@ export function ReportView({
   const [guideStatus, setGuideStatus] = useState<GuideStatus | null>(null);
   const [os, setOs] = useState<OS>(initialOs);
   const [detectedOs, setDetectedOs] = useState<OS | null>(null);
+  // On a phone or tablet: there's no computer to detect (an iPhone isn't macOS), so nothing is marked "you".
+  const [phone, setPhone] = useState(false);
   const [arch, setArch] = useState<Arch | null>(null);
   const [mode, setMode] = useState<Mode>(initialMode ?? (initial ? defaultMode(initial) : "source"));
   const [refresh, setRefresh] = useState(0);
@@ -206,11 +208,13 @@ export function ReportView({
 
   useEffect(() => {
     const d = detectOS();
-    setDetectedOs(d);
-    detectArch().then(setArch);
+    const onPhone = isPhone();
+    setPhone(onPhone);
+    setDetectedOs(onPhone ? null : d);
+    if (!onPhone) detectArch().then(setArch);
     const q = new URLSearchParams(window.location.search);
     const qOs = q.get("os") as OS | null;
-    setOs(osPage ?? (qOs && OS_LIST.includes(qOs) ? qOs : d));
+    setOs(osPage ?? (qOs && OS_LIST.includes(qOs) ? qOs : onPhone ? initialOs : d));
     const qMode = q.get("mode");
     if (refresh === 0 && (initial || initialError)) return;
 
@@ -351,6 +355,7 @@ export function ReportView({
       result={result}
       os={os}
       detectedOs={detectedOs}
+      phone={phone}
       arch={arch}
       onOs={setOs}
       mode={mode}
@@ -384,6 +389,7 @@ function Report({
   result,
   os,
   detectedOs,
+  phone,
   arch,
   onOs,
   mode,
@@ -415,6 +421,7 @@ function Report({
   result: Result;
   os: OS;
   detectedOs: OS | null;
+  phone: boolean;
   arch: Arch | null;
   onOs: (os: OS) => void;
   mode: Mode;
@@ -566,7 +573,7 @@ function Report({
           )}
         </div>
         <div className="fit-device">
-          <span className="eyebrow">Your system</span>
+          <span className="eyebrow">{phone ? "Pick your computer" : "Your system"}</span>
           <div className="seg" role="radiogroup" aria-label="Operating system">
             {OS_LIST.map((o) => (
               // Real links, so search engines find each system's page; clicking just switches in place.
@@ -586,7 +593,7 @@ function Report({
               </a>
             ))}
           </div>
-          {myArch && <span className="note">Your chip: {archLabel(myArch, os)}</span>}
+          {phone ? <span className="note">On a phone: choose the computer you&apos;ll install it on.</span> : myArch && <span className="note">Your chip: {archLabel(myArch, os)}</span>}
         </div>
       </section>
 
@@ -613,7 +620,7 @@ function Report({
       />
       {/* <FlowMap flow={flow} onJump={...} /> — the route diagram, see the note on `flow` above. */}
 
-      <div className="sheet">
+      <div className={`sheet sheet-${mode}`}>
         <div className="sheet-main">
           <div className="tabs" role="tablist" aria-label="How to set it up" id="main-tabs">
             <button role="tab" aria-selected={mode === "install"} className={mode === "install" ? "on" : ""} onClick={() => onMode("install")}>

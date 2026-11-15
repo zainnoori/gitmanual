@@ -1085,7 +1085,7 @@ button.fb-media { width: 100%; padding: 0; border: 0; border-block: 1.5px solid 
 }
 
 /* The narrowest phones: the menu gets its own row under the logo instead of running off the screen. */
-@media (max-width: 440px) {
+@media (max-width: 560px) {
   .nav-inner { flex-wrap: wrap; height: auto; padding-block: 10px 6px; row-gap: 4px; }
   .nav-links { justify-content: space-between; width: calc(100% + 18px); margin-inline: -9px; }
   .fb-tabs a { padding-inline: 6px; gap: 5px; }
@@ -1864,3 +1864,38 @@ a.insp-ev:hover { color: var(--ink); }
 .insp-locked-more:hover { text-decoration: underline; }
 .insp-locked-hi { margin: 0 0 -4px; color: var(--pencil); font: 600 var(--fs-meta) var(--sans); }
 .insp-teaser-pitch { font: 600 var(--fs-small)/1.4 var(--sans); }
+
+/* ── The manual on a phone: the answer first ────────────────────────────────────────────────────────────────────────
+   Someone opening a link on a phone wants to know what it is, whether it will work, and where to start. The header's
+   two halves and the sidebar dissolve (display: contents) so their pieces can be put in that order; desktop is
+   untouched. */
+@media (max-width: 760px) {
+  .report { display: flex; flex-direction: column; }
+  .report > .sheet-head, .report > .sheet-head > div:first-child, .report .head-side { display: contents; }
+  .report > .sheet-head > div:first-child > * { order: 1; }
+  .report > .fit { order: 2; }
+  .report .spec { order: 3; margin-top: 14px; }
+  .report > .alts { order: 4; }
+  .report > .start { order: 5; }
+  .report .ad-head { order: 6; margin-top: 18px; }
+  .report > .sheet { order: 7; margin-top: 18px; }
+  .report > .stamp-line { order: 8; margin-top: 18px; }
+  .report > .sheet-head > div:first-child > .dl-toggle { order: 9; justify-self: start; align-self: flex-start; margin-top: 12px; }
+
+  /* Difficulty and time only: stars and activity are already in "Before you start". */
+  .report .spec > div:nth-child(3), .report .spec > div:nth-child(4) { display: none; }
+
+  /* Start here: the best option in full, the others as a short list. */
+  .start-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .door:not(.best) { padding-block: 10px; }
+  .door:not(.best) .door-sub { display: none; }
+
+  /* The parts list: before the steps when building from source (that's what it lists), right after them when the
+     page opens on an install that doesn't need them (Docker, a download). The rest of the sidebar follows. */
+  .sheet { display: flex; flex-direction: column; align-items: stretch; gap: 16px; }
+  .sheet > .sheet-side { display: contents; }
+  .sheet > .sheet-main { order: 2; }
+  .sheet .parts { order: 3; align-self: stretch; width: auto; }
+  .sheet.sheet-source .parts { order: 1; }
+  .sheet > .sheet-side > :not(.parts) { order: 4; }
+}
