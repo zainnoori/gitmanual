@@ -809,11 +809,20 @@ function Report({
         </div>
 
         <aside className="sheet-side">
-          {inspection && !priv && <InspectionCard repo={meta.fullName} />}
           {/* Hidden when there's nothing to list: no parts to install and no settings. */}
           {(parts.length > 0 || a.envVars.length > 0) && (
           <div className="parts" id="parts">
             <h2 className="parts-h">Parts list</h2>
+            {/* A ready-made app needs none of this: say so, rather than list Rust for someone downloading a .dmg. */}
+            {mode === "install" && hasDownload(install, os) && parts.length > 0 && (
+              <p className="parts-only">
+                Only for{" "}
+                <button className="link" onClick={() => onMode("source")}>
+                  building from source
+                </button>
+                . The download above needs none of it.
+              </p>
+            )}
             {parts.length > 0 && (
               <ul>
                 {parts.map((p) => (
@@ -848,6 +857,9 @@ function Report({
 
           {!priv && <Contributors fullName={meta.fullName} htmlUrl={meta.htmlUrl} />}
 
+          {/* The Pro teaser after what's useful on its own: parts and the people behind it. */}
+          {inspection && !priv && <InspectionCard repo={meta.fullName} />}
+
           {!priv && (
             <div className="side-card">
               <h3>Share this manual</h3>
@@ -872,7 +884,7 @@ function Report({
                   ))}
                 </div>
               )}
-              <BadgeCard fullName={meta.fullName} collapsed={phone} />
+              <BadgeCard fullName={meta.fullName} phone={phone} />
             </div>
           )}
 
@@ -1897,7 +1909,21 @@ function DidItWork({ repo, os, votes, onVotes }: { repo: string; os: OS; votes: 
 }
 
 // For maintainers: a README badge that links newcomers to this manual.
-function BadgeCard({ fullName, collapsed }: { fullName: string; collapsed?: boolean }) {
+function BadgeCard({ fullName, phone }: { fullName: string; phone?: boolean }) {
+  // Open for the repo's owner (signed in as them); one folded line for everyone else, and always on a phone.
+  const [mine, setMine] = useState(false);
+  useEffect(() => {
+    if (phone) return;
+    let live = true;
+    fetch("/api/pro", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: ProStatus) => live && setMine(Boolean(j.login) && j.login!.toLowerCase() === fullName.split("/")[0].toLowerCase()))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [fullName, phone]);
+  const collapsed = phone || !mine;
   // The same address on the server and in the browser, so the Markdown never differs between the two.
   const site = (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").replace(/\/$/, "");
   const markdown = `[![Setup manual](${site}/${fullName}/badge.svg)](${site}/${fullName})`;
@@ -1909,7 +1935,6 @@ function BadgeCard({ fullName, collapsed }: { fullName: string; collapsed?: bool
       <CopyButton text={markdown} className="btn btn-sm" label="Copy the badge Markdown" />
     </>
   );
-  // On a phone it's one line: maintainers rarely edit a README there.
   if (collapsed)
     return (
       <details className="side-sub badge-more">
