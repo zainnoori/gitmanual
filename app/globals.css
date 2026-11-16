@@ -386,7 +386,8 @@ a.chip:hover { border-color: var(--ink); color: var(--ink); text-decoration: und
 .step h3 { font: 700 var(--fs-title) var(--display); letter-spacing: -0.01em; padding-top: 4px; }
 
 .code { position: relative; margin-top: 12px; background: var(--code); color: #eef0f4; border-radius: 12px; }
-.code pre { margin: 0; padding: 14px 76px 14px 16px; overflow-x: auto; font: var(--fs-small)/1.65 var(--mono); }
+/* The scrolling area ends before the Copy button, so a long command never runs underneath it. */
+.code pre { margin: 0 70px 0 0; padding: 14px 6px 14px 16px; overflow-x: auto; font: var(--fs-small)/1.65 var(--mono); }
 .copy {
   position: absolute; top: 9px; right: 9px; border: 1px solid #3a3d45; background: #24262d; color: #eef0f4;
   border-radius: 7px; padding: 3px 10px; font-size: var(--fs-meta); cursor: pointer;
@@ -1913,3 +1914,7 @@ a.insp-ev:hover { color: var(--ink); }
 .device-more[open] > summary { margin-bottom: 10px; }
 .badge-more > summary { cursor: pointer; font: 600 var(--fs-small) var(--sans); }
 .badge-more[open] > summary { margin-bottom: 10px; }
+.parts-only { margin: -4px 0 10px; font-size: var(--fs-meta); color: var(--pencil); }
+.parts-only .link { font-size: inherit; }
+.chat-fab.small .chat-fab-text { display: none; }
+.chat-fab.small:hover .chat-fab-text, .chat-fab.small:focus-visible .chat-fab-text { display: inline; }

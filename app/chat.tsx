@@ -367,6 +367,14 @@ export function Chat({ repo, os }: { repo: string; os: OS }) {
 // shift a fixed panel. Kept mounted while closed (inert, off screen), so closing it loses nothing.
 function Drawer({ open, onOpen, onClose, head, children }: { open: boolean; onOpen: () => void; onClose: () => void; head: ReactNode; children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
+  // Once the page is scrolled, the button shrinks to its icon so it doesn't sit on top of the page's own buttons.
+  const [small, setSmall] = useState(false);
+  useEffect(() => {
+    const on = () => setSmall(window.scrollY > 400);
+    on();
+    window.addEventListener("scroll", on, { passive: true });
+    return () => window.removeEventListener("scroll", on);
+  }, []);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
   const wasOpen = useRef(false);
@@ -401,8 +409,8 @@ function Drawer({ open, onOpen, onClose, head, children }: { open: boolean; onOp
   if (!mounted) return null;
   return createPortal(
     <>
-      <button ref={trigger} type="button" className="chat-fab" aria-expanded={open} aria-controls="chat-drawer" onClick={onOpen} hidden={open}>
-        <AiIcon /> Ask about this repo <span className="ai-tag">AI</span>
+      <button ref={trigger} type="button" className={`chat-fab${small ? " small" : ""}`} aria-label="Ask about this repo" aria-expanded={open} aria-controls="chat-drawer" onClick={onOpen} hidden={open}>
+        <AiIcon /> <span className="chat-fab-text">Ask about this repo</span> <span className="ai-tag">AI</span>
         {fresh && <span className="chat-new">New</span>}
       </button>
       {/* Dims the page so the drawer has the focus; clicking it closes the drawer. */}
