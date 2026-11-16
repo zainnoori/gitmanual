@@ -7,7 +7,7 @@ import { compactCount } from "@/lib/format";
 import { parseRepoUrl } from "@/lib/github";
 import type { Arch } from "@/lib/install";
 import type { OS } from "@/lib/os";
-import { AD_FREE_COOKIE } from "@/lib/site";
+import { AD_FREE_COOKIE, SIGNED_IN_COOKIE } from "@/lib/site";
 
 // Phones and tablets: people reading about a repo they'll install later on a computer.
 export function isPhone(): boolean {
@@ -159,11 +159,13 @@ const NAV = [
   ["/how-it-works", "How it works"],
 ] as const;
 
+
 // Every menu item looks the same; the current page is outlined. The product's pages come first; the browser
 // extension (a puzzle-piece mark) sits with the GitHub link after a divider, as the ways to take gitmanual with you.
 // The GitHub link only shows once the project's own repo is set (NEXT_PUBLIC_REPO_URL).
 // "Pro" comes last of the pages, as quiet as the rest (only while Pro is on). For someone with Pro in this browser
 // (the no-ads cookie, lib/adfree.ts) it reads "Pro ✓" and leads to their plan, which is on the same page.
+// Signed in, your avatar comes last: the account menu.
 export function NavLinks({ repo, stars, extension, pro }: { repo: string | null; stars: number | null; extension: string | null; pro: boolean }) {
   const path = usePathname();
   const [havePro, setHavePro] = useState(false);
@@ -237,6 +239,7 @@ export function NavLinks({ repo, stars, extension, pro }: { repo: string | null;
             )}
           </a>
         )}
+        <AccountMenu pro={pro} />
       </nav>
     </>
   );
@@ -281,7 +284,7 @@ function NavSearch() {
           setValue(e.target.value);
           setBad(false);
         }}
-        placeholder="Look up a repo: owner/repo"
+        placeholder="Look up owner/repo"
         aria-label="Look up a GitHub repo"
         aria-invalid={bad || undefined}
         autoComplete="off"
@@ -377,5 +380,113 @@ export function LaunchBanner({ url }: { url: string }) {
         ×
       </button>
     </div>
+  );
+}
+
+// The header's account menu: your GitHub avatar, and where your things are. Only shown when signed in (the
+// SIGNED_IN_COOKIE hint), and only then is /api/account asked who you are; the answer is kept for the browser tab.
+type Account = { login: string; id: number; pro: boolean; proEnabled: boolean; admin: boolean };
+const ACCOUNT_KEY = "gitmanual-account";
+
+function AccountMenu({ pro: proSite }: { pro: boolean }) {
+  const [me, setMe] = useState<Account | null>(null);
+  const menu = useRef<HTMLDetailsElement>(null);
+  const path = usePathname();
+
+  useEffect(() => {
+    const hinted = new RegExp(`(^|; )${SIGNED_IN_COOKIE}=`).test(document.cookie);
+    if (!hinted) {
+      setMe(null);
+      try {
+        sessionStorage.removeItem(ACCOUNT_KEY);
+      } catch {}
+      return;
+    }
+    try {
+      const kept = JSON.parse(sessionStorage.getItem(ACCOUNT_KEY) ?? "null") as (Account & { at: number }) | null;
+      if (kept && Date.now() - kept.at < 10 * 60_000) return setMe(kept);
+    } catch {}
+    let live = true;
+    fetch("/api/account", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((j: Partial<Account>) => {
+        if (!live) return;
+        const a = j.login ? (j as Account) : null;
+        setMe(a);
+        try {
+          if (a) sessionStorage.setItem(ACCOUNT_KEY, JSON.stringify({ ...a, at: Date.now() }));
+          else sessionStorage.removeItem(ACCOUNT_KEY);
+        } catch {}
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [path]);
+
+  // Closes on a click outside, Escape, or moving to another page.
+  useEffect(() => {
+    const out = (e: MouseEvent) => menu.current?.open && !menu.current.contains(e.target as Node) && (menu.current.open = false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && menu.current?.open) {
+        menu.current.open = false;
+        menu.current.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("click", out);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("click", out);
+      document.removeEventListener("keydown", esc);
+    };
+  }, []);
+  useEffect(() => {
+    if (menu.current) menu.current.open = false;
+  }, [path]);
+
+  if (!me) return null;
+  const signOut = async () => {
+    await fetch("/api/github/logout", { method: "POST" }).catch(() => {});
+    try {
+      sessionStorage.removeItem(ACCOUNT_KEY);
+      localStorage.removeItem("gitmanual-saved"); // from the first version of Saved
+    } catch {}
+    window.location.reload();
+  };
+  return (
+    <details className="account" ref={menu}>
+      <summary aria-label={`Your account (@${me.login})`} title={`@${me.login}`}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- a 28px GitHub avatar */}
+        <img src={`https://avatars.githubusercontent.com/u/${me.id}?s=64&v=4`} alt="" width={28} height={28} />
+      </summary>
+      <div className="account-list" role="menu">
+        <p className="account-who">
+          Signed in as <b>@{me.login}</b>
+          {me.pro && <span className="account-pro">Pro</span>}
+        </p>
+        <Link role="menuitem" href="/profile/saved">
+          Saved repos
+        </Link>
+        {me.proEnabled && proSite && (
+          <Link role="menuitem" href="/pro">
+            {me.pro ? "Your Pro plan" : "Get GitManual Pro"}
+          </Link>
+        )}
+        <Link role="menuitem" href="/developers">
+          API keys
+        </Link>
+        <Link role="menuitem" href="/private">
+          Private repos
+        </Link>
+        {me.admin && (
+          <Link role="menuitem" href="/admin/chat">
+            Admin
+          </Link>
+        )}
+        <button type="button" role="menuitem" className="account-out" onClick={signOut}>
+          Sign out
+        </button>
+      </div>
+    </details>
   );
 }

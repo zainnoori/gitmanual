@@ -43,6 +43,9 @@ export function open(value: string | undefined): Session | null {
 export const cookieOptions = (maxAge = MAX_AGE) =>
   ({ httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/api", maxAge }) as const;
 
+// The page-readable "signed in" hint (lib/site.ts SIGNED_IN_COOKIE): for the whole site, as long as the sign-in.
+export const hintOptions = (maxAge = MAX_AGE) => ({ secure: process.env.NODE_ENV === "production", sameSite: "lax", path: "/", maxAge }) as const;
+
 // Trades the code GitHub sends back (or a refresh token) for a user access token.
 async function tokenRequest(app: GitHubApp, params: Record<string, string>): Promise<Session> {
   const res = await fetch("https://github.com/login/oauth/access_token", {
