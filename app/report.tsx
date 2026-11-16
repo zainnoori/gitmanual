@@ -11,6 +11,7 @@ import { beforeYouStart, type Fact } from "@/lib/facts";
 import type { Pick } from "@/lib/picks";
 import { fitCheck, freshness, setupTime } from "@/lib/fit";
 import { compactCount } from "@/lib/format";
+import { hasDownload } from "@/lib/facets";
 // import { setupFlow } from "@/lib/flow"; — for the route diagram, see `flow` in Report
 import { addonLinks, installChoices, venvFolder, withVenv, type Arch, type Asset, type InstallKind, type InstallOptions } from "@/lib/install";
 import { OS_LABEL, OS_LIST, OS_SLUG, type OS } from "@/lib/os";
@@ -871,11 +872,11 @@ function Report({
                   ))}
                 </div>
               )}
-              <BadgeCard fullName={meta.fullName} />
+              <BadgeCard fullName={meta.fullName} collapsed={phone} />
             </div>
           )}
 
-          {(a.hints.length > 0 || a.otherManifests.length > 0) && (
+          {(a.hints.length > 0 || (a.otherManifests.length > 0 && !phone && !hasDownload(install, os))) && (
             <div className="side-card">
               <h3>Good to know</h3>
               <ul className="hints">
@@ -884,7 +885,8 @@ function Report({
                     <ReactMarkdown components={inline}>{h}</ReactMarkdown>
                   </li>
                 ))}
-                {a.otherManifests.length > 0 && (
+                {/* Build files only matter to someone building it: not shown with a ready-made download, or on a phone. */}
+                {a.otherManifests.length > 0 && !phone && !hasDownload(install, os) && (
                   <li>
                     Nested projects: <code>{a.otherManifests.slice(0, 4).join(", ")}</code>
                     {a.otherManifests.length > 4 ? ` and ${a.otherManifests.length - 4} more` : ""}
@@ -990,6 +992,33 @@ function InstallPanel({
   );
 
   const devices = release?.deviceAssets ?? [];
+  const deviceList = devices.map((d) => (
+    <div className="asset primary" key={d.name}>
+      <div className="asset-head">
+        <div>
+          <div className="asset-name">{d.name}</div>
+          <div className="note">
+            Android app · {formatSize(d.size)}
+            {d.downloads ? ` · ${d.downloads.toLocaleString()} downloads` : ""}
+          </div>
+        </div>
+        <a className="btn btn-go btn-sm" href={d.url}>
+          Download
+        </a>
+      </div>
+      <CodeBlock text={d.commands.join("\n")} />
+    </div>
+  ));
+  // With an app for this computer too, the Android files are extra: one closed line after it, not a long card first.
+  const deviceExtra = devices.length > 0 && (
+    <details className="panel more device-more">
+      <summary>
+        Android / TV app ({devices.length} {devices.length === 1 ? "file" : "files"})
+      </summary>
+      <p className="note">Runs on the device. Download it, then install it from this computer with adb (turn on ADB debugging in the device&apos;s Developer Options first).</p>
+      {deviceList}
+    </details>
+  );
   const deviceCard = devices.length > 0 && release && (
     <div className="panel">
       <div className="panel-head">
@@ -1002,23 +1031,7 @@ function InstallPanel({
         This app runs on the device, not on your {OS_LABEL[os]} computer. Download it, then install it from the computer with adb (turn on ADB
         debugging in the device&apos;s Developer Options first).
       </p>
-      {devices.map((d) => (
-        <div className="asset primary" key={d.name}>
-          <div className="asset-head">
-            <div>
-              <div className="asset-name">{d.name}</div>
-              <div className="note">
-                Android app · {formatSize(d.size)}
-                {d.downloads ? ` · ${d.downloads.toLocaleString()} downloads` : ""}
-              </div>
-            </div>
-            <a className="btn btn-go btn-sm" href={d.url}>
-              Download
-            </a>
-          </div>
-          <CodeBlock text={d.commands.join("\n")} />
-        </div>
-      ))}
+      {deviceList}
     </div>
   );
 
@@ -1057,7 +1070,6 @@ function InstallPanel({
 
   return (
     <>
-      {deviceCard}
       {pageCard}
       {recommended && release && (
         <div className="panel">
@@ -1130,6 +1142,7 @@ function InstallPanel({
           </div>
         );
       })}
+      {deviceExtra}
     </>
   );
 }
@@ -1884,18 +1897,31 @@ function DidItWork({ repo, os, votes, onVotes }: { repo: string; os: OS; votes: 
 }
 
 // For maintainers: a README badge that links newcomers to this manual.
-function BadgeCard({ fullName }: { fullName: string }) {
+function BadgeCard({ fullName, collapsed }: { fullName: string; collapsed?: boolean }) {
   // The same address on the server and in the browser, so the Markdown never differs between the two.
   const site = (process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000").replace(/\/$/, "");
   const markdown = `[![Setup manual](${site}/${fullName}/badge.svg)](${site}/${fullName})`;
-  return (
-    <div className="side-sub">
-      <h4>Is this your repo?</h4>
-      <p className="badge-note">Add a badge to your README so newcomers find these steps.</p>
+  const body = (
+    <>
       {/* eslint-disable-next-line @next/next/no-img-element -- a tiny SVG badge */}
       <img className="badge-preview" src={`/${fullName}/badge.svg`} alt="Setup manual badge" height={20} />
       <code className="badge-code">{markdown}</code>
       <CopyButton text={markdown} className="btn btn-sm" label="Copy the badge Markdown" />
+    </>
+  );
+  // On a phone it's one line: maintainers rarely edit a README there.
+  if (collapsed)
+    return (
+      <details className="side-sub badge-more">
+        <summary>Is this your repo? Add a badge to your README</summary>
+        {body}
+      </details>
+    );
+  return (
+    <div className="side-sub">
+      <h4>Is this your repo?</h4>
+      <p className="badge-note">Add a badge to your README so newcomers find these steps.</p>
+      {body}
     </div>
   );
 }

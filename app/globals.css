@@ -1880,10 +1880,16 @@ a.insp-ev:hover { color: var(--ink); }
   .report .spec { order: 3; margin-top: 14px; }
   .report > .alts { order: 4; }
   .report > .start { order: 5; }
-  .report .ad-head { order: 6; margin-top: 18px; }
-  .report > .sheet { order: 7; margin-top: 18px; }
-  .report > .stamp-line { order: 8; margin-top: 18px; }
-  .report > .sheet-head > div:first-child > .dl-toggle { order: 9; justify-self: start; align-self: flex-start; margin-top: 12px; }
+  /* The PDF right under "Start here", so it's on the first screens and not after everything. */
+  .report > .sheet-head > div:first-child > .dl-toggle { order: 6; justify-self: start; align-self: flex-start; margin-top: 14px; }
+  .report .ad-head { order: 7; margin-top: 18px; }
+  .report > .sheet { order: 8; margin-top: 18px; }
+  .report > .stamp-line { order: 9; margin-top: 18px; }
+
+  /* "Will it work?": the stamp sits on the card's corner like a sticker instead of taking a row of its own. */
+  .report > .fit { position: relative; }
+  .report .fit-stamp { position: absolute; top: -16px; right: 14px; width: 46px; height: 46px; font-size: 22px; }
+  .report .fit-body .eyebrow { padding-right: 52px; }
 
   /* Difficulty and time only: stars and activity are already in "Before you start". */
   .report .spec > div:nth-child(3), .report .spec > div:nth-child(4) { display: none; }
@@ -1903,3 +1909,7 @@ a.insp-ev:hover { color: var(--ink); }
   .sheet > .sheet-side > :not(.parts) { order: 4; }
 }
 .made-for { margin: 0 0 14px; padding: 12px 16px; border-color: color-mix(in srgb, var(--no) 60%, var(--line)); background: color-mix(in srgb, var(--no) 8%, var(--sheet)); font-size: var(--fs-small); }
+.device-more > summary { cursor: pointer; font: var(--ui); }
+.device-more[open] > summary { margin-bottom: 10px; }
+.badge-more > summary { cursor: pointer; font: 600 var(--fs-small) var(--sans); }
+.badge-more[open] > summary { margin-bottom: 10px; }
