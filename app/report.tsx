@@ -480,16 +480,29 @@ function Report({
           </h1>
           {meta.description && <p className="lead">{meta.description}</p>}
           <div className="chips">
-            {(a.stacks.length ? a.stacks : [meta.language ?? "Unknown stack"]).map((s) => (
-              <span className="chip" key={s}>
-                {s}
-              </span>
-            ))}
-            {meta.topics.slice(0, 4).map((t) => (
-              <span className="chip ghost" key={t}>
-                #{t}
-              </span>
-            ))}
+            {/* The language and the GitHub topics open the shelf filtered to the other manuals that share them. */}
+            {(a.stacks.length ? a.stacks : [meta.language ?? "Unknown stack"]).map((s) =>
+              s === meta.language ? (
+                <Link className="chip" key={s} href={`/shelf?lang=${encodeURIComponent(s)}`} title={`More ${s} repos`}>
+                  {s}
+                </Link>
+              ) : (
+                <span className="chip" key={s}>
+                  {s}
+                </span>
+              ),
+            )}
+            {meta.topics.slice(0, 4).map((t) =>
+              /^[a-z0-9-]{1,50}$/i.test(t) ? (
+                <Link className="chip ghost" key={t} href={`/shelf?topic=${t.toLowerCase()}`} title={`More repos tagged #${t}`}>
+                  #{t}
+                </Link>
+              ) : (
+                <span className="chip ghost" key={t}>
+                  #{t}
+                </span>
+              ),
+            )}
           </div>
           <BeforeYouStart facts={beforeYouStart(result)} />
           {!priv && <DownloadManual repo={meta.fullName} os={os} />}

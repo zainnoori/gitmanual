@@ -302,6 +302,9 @@ html[data-noads] .ad { display: none; } /* Pro: no ads, and no space kept for on
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 18px; }
 .chip { font: 600 var(--fs-meta) var(--mono); border: 1.5px solid var(--ink); background: var(--sky); border-radius: 999px; padding: 2px 10px; }
 .chip.ghost { background: none; border-color: var(--line-strong); color: var(--pencil); font-weight: 500; }
+a.chip { color: var(--ink); text-decoration: none; }
+a.chip.ghost { color: var(--pencil); }
+a.chip:hover { border-color: var(--ink); color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .spec { display: grid; grid-template-columns: repeat(2, minmax(140px, 1fr)); gap: 0; margin: 0; background: var(--sheet); border: 1.5px solid var(--ink); border-radius: 14px; overflow: hidden; }
 .spec div { padding: 11px 16px; border-bottom: 1px solid var(--line); }
 .spec div:nth-child(odd) { border-right: 1px solid var(--line); }
