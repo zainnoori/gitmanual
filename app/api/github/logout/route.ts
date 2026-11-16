@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { AD_FREE_COOKIE } from "@/lib/site";
+import { AD_FREE_COOKIE, SIGNED_IN_COOKIE } from "@/lib/site";
 import { SESSION_COOKIE } from "@/lib/session";
 
 // "Disconnect": forgets the visitor's GitHub access in this browser. Removing the app itself is on GitHub
@@ -8,5 +8,6 @@ export async function POST() {
   const res = NextResponse.json({ ok: true });
   res.cookies.delete({ name: SESSION_COOKIE, path: "/api" });
   res.cookies.delete({ name: AD_FREE_COOKIE, path: "/" });
+  res.cookies.delete({ name: SIGNED_IN_COOKIE, path: "/" });
   return res;
 }

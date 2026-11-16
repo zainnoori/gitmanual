@@ -128,6 +128,18 @@ const SCHEMA = `
     data TEXT NOT NULL,             -- JSON: the whole report (facts, findings, headline, grades, summary)
     scanned_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS saves (
+    github_id INTEGER NOT NULL,     -- who saved it (signed in with GitHub)
+    key TEXT NOT NULL,              -- lower-case owner/repo; public repos only
+    os TEXT NOT NULL,               -- the computer they were looking at: mac | windows | linux
+    status TEXT NOT NULL,           -- try | installed | dropped
+    release_tag TEXT,               -- the latest release when saved, for "new release since you saved"
+    saved_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (github_id, key)
+  );
+  CREATE INDEX IF NOT EXISTS saves_key ON saves (key);
+  CREATE INDEX IF NOT EXISTS saves_day ON saves (saved_at);
   CREATE TABLE IF NOT EXISTS inspection_snapshots (
     key TEXT NOT NULL,              -- lower-case owner/repo
     scanned_at INTEGER NOT NULL,
@@ -927,4 +939,141 @@ export function saveInspection(key: string, version: number, data: unknown, scan
       "write",
     ),
   );
+}
+
+// ── Saved repos (/profile/saved) ─────────────────────────────────────────────────────────────────────────────────
+// A signed-in person's shortlist: what they want to try, have installed or gave up on. Public repos only.
+
+export const SAVE_STATUSES = ["try", "installed", "dropped"] as const;
+export type SaveStatus = (typeof SAVE_STATUSES)[number];
+export const MAX_SAVES = 500;
+
+export type Save = { key: string; os: string; status: SaveStatus; savedAt: number; updatedAt: number; releaseTag: string | null };
+export type SavedCard = Save & { card: RepoCard | null; latestTag: string | null; latestAt: string | null };
+
+const latestTag = "json_extract(r.data, '$.install.release.tag')";
+
+export function getSave(githubId: number, key: string): Promise<Save | null> {
+  return strictly(async (c) => {
+    const r = (await c.execute({ sql: "SELECT * FROM saves WHERE github_id = ? AND key = ?", args: [githubId, key] })).rows[0];
+    return r ? toSave(r) : null;
+  });
+}
+
+const toSave = (r: Record<string, unknown>): Save => ({
+  key: String(r.key),
+  os: String(r.os),
+  status: String(r.status) as SaveStatus,
+  savedAt: Number(r.saved_at),
+  updatedAt: Number(r.updated_at),
+  releaseTag: r.release_tag == null ? null : String(r.release_tag),
+});
+
+// Saves a repo, or changes the status or computer of one already saved. The release tag is the one known when it was
+// first saved, so "new release" means new since then. `null` when the list is full.
+export function putSave(githubId: number, key: string, os: string, status: SaveStatus, now = Date.now()): Promise<Save | null> {
+  return strictly(async (c) => {
+    const had = (await c.execute({ sql: "SELECT 1 FROM saves WHERE github_id = ? AND key = ?", args: [githubId, key] })).rows.length > 0;
+    if (!had) {
+      const n = Number((await c.execute({ sql: "SELECT COUNT(*) AS n FROM saves WHERE github_id = ?", args: [githubId] })).rows[0].n);
+      if (n >= MAX_SAVES) return null;
+    }
+    await c.execute({
+      sql: `INSERT INTO saves (github_id, key, os, status, release_tag, saved_at, updated_at)
+            VALUES (?, ?, ?, ?, (SELECT ${latestTag} FROM repos r WHERE r.key = ?), ?, ?)
+            ON CONFLICT (github_id, key) DO UPDATE SET os = excluded.os, status = excluded.status, updated_at = excluded.updated_at`,
+      args: [githubId, key, os, status, key, now, now],
+    });
+    const r = (await c.execute({ sql: "SELECT * FROM saves WHERE github_id = ? AND key = ?", args: [githubId, key] })).rows[0];
+    return toSave(r);
+  });
+}
+
+export function deleteSave(githubId: number, key: string): Promise<void> {
+  return strictly(async (c) => {
+    await c.execute({ sql: "DELETE FROM saves WHERE github_id = ? AND key = ?", args: [githubId, key] });
+  });
+}
+
+// Undo for "Remove": puts saves back exactly as they were (when saved, status, computer, release seen). `false`, and
+// nothing changed, when that would take the list past MAX_SAVES.
+export function restoreSaves(githubId: number, saves: Save[]): Promise<boolean> {
+  return strictly(async (c) => {
+    const keys = [...new Set(saves.map((x) => x.key))];
+    const n = Number((await c.execute({ sql: "SELECT COUNT(*) AS n FROM saves WHERE github_id = ?", args: [githubId] })).rows[0].n);
+    const had = Number(
+      (await c.execute({ sql: `SELECT COUNT(*) AS n FROM saves WHERE github_id = ? AND key IN (${keys.map(() => "?").join(",")})`, args: [githubId, ...keys] }))
+        .rows[0].n,
+    );
+    if (n - had + keys.length > MAX_SAVES) return false;
+    await c.batch(
+      saves.map((x) => ({
+        sql: `INSERT OR REPLACE INTO saves (github_id, key, os, status, release_tag, saved_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        args: [githubId, x.key, x.os, x.status, x.releaseTag, x.savedAt, x.updatedAt],
+      })),
+      "write",
+    );
+    return true;
+  });
+}
+
+// "Seen the release": the saved tag moves to the latest one.
+export function ackRelease(githubId: number, key: string): Promise<void> {
+  return strictly(async (c) => {
+    await c.execute({
+      sql: `UPDATE saves SET release_tag = (SELECT ${latestTag} FROM repos r WHERE r.key = saves.key) WHERE github_id = ? AND key = ?`,
+      args: [githubId, key],
+    });
+  });
+}
+
+export function listSaves(githubId: number): Promise<SavedCard[]> {
+  return strictly(async (c) => {
+    const rows = await c.execute({
+      sql: `SELECT s.*, r.full_name, r.description, r.stars, r.language, r.difficulty, r.views, r.analyzed_at, r.rising_at,
+                   r.worked, r.stuck, ${latestTag} AS latest_tag, json_extract(r.data, '$.install.release.publishedAt') AS latest_at
+            FROM saves s LEFT JOIN repos r ON r.key = s.key
+            WHERE s.github_id = ?
+            ORDER BY s.updated_at DESC`,
+      args: [githubId],
+    });
+    return rows.rows.map((r) => ({
+      ...toSave(r),
+      latestTag: r.latest_tag == null ? null : String(r.latest_tag),
+      latestAt: r.latest_at == null ? null : String(r.latest_at),
+      card:
+        r.full_name == null
+          ? null
+          : {
+              fullName: String(r.full_name),
+              description: r.description == null ? null : String(r.description),
+              stars: Number(r.stars),
+              language: r.language == null ? null : String(r.language),
+              difficulty: String(r.difficulty),
+              views: Number(r.views),
+              worked: Number(r.worked),
+              stuck: Number(r.stuck),
+              analyzedAt: Number(r.analyzed_at),
+              risingAt: r.rising_at == null ? null : Number(r.rising_at),
+            },
+    }));
+  });
+}
+
+// For /admin: how many saves, by how many people, and what's saved most.
+export type SaveStats = { total: number; people: number; recent: number; top: { repo: string; saves: number }[] };
+export function saveStats(days = 30, now = Date.now()): Promise<SaveStats> {
+  return strictly(async (c) => {
+    const [all, recent, top] = await Promise.all([
+      c.execute("SELECT COUNT(*) AS n, COUNT(DISTINCT github_id) AS p FROM saves"),
+      c.execute({ sql: "SELECT COUNT(*) AS n FROM saves WHERE saved_at > ?", args: [now - days * 864e5] }),
+      c.execute("SELECT key, COUNT(*) AS n FROM saves GROUP BY key ORDER BY n DESC, key LIMIT 10"),
+    ]);
+    return {
+      total: Number(all.rows[0].n),
+      people: Number(all.rows[0].p),
+      recent: Number(recent.rows[0].n),
+      top: top.rows.map((r) => ({ repo: String(r.key), saves: Number(r.n) })),
+    };
+  });
 }

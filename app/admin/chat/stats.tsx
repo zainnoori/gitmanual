@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import type { ChatStats } from "@/lib/budget";
-import type { InterestStats } from "@/lib/db";
+import type { InterestStats, SaveStats } from "@/lib/db";
 
-type Stats = ChatStats & { logins: Record<string, string | null>; pdfInterest: InterestStats; inspectionInterest?: InterestStats; downloads: { md: number; pdf: number }; teamWaitlist: number; guides: { day: string; guides: number; people: number; spent: number }[] };
+type Stats = ChatStats & { logins: Record<string, string | null>; pdfInterest: InterestStats; inspectionInterest?: InterestStats; downloads: { md: number; pdf: number }; teamWaitlist: number; saves?: SaveStats; guides: { day: string; guides: number; people: number; spent: number }[] };
 
 const usd = (n: number, digits = 2) => `$${n.toFixed(digits)}`;
 const day = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString(undefined, { day: "numeric", month: "short", timeZone: "UTC" });
@@ -120,6 +120,29 @@ export function ChatAdmin() {
           )}
           .
         </p>
+      )}
+
+      {stats.saves && (
+        <>
+          <h2>Saved repos</h2>
+          <p>
+            <strong>{stats.saves.total.toLocaleString()}</strong> saves by <strong>{stats.saves.people.toLocaleString()}</strong>{" "}
+            {stats.saves.people === 1 ? "person" : "people"}, {stats.saves.recent.toLocaleString()} in the last 30 days.
+            {stats.saves.top.length > 0 && (
+              <>
+                {" "}
+                Most saved:{" "}
+                {stats.saves.top.map((r, i) => (
+                  <span key={r.repo}>
+                    {i > 0 && ", "}
+                    <a href={`/${r.repo}`}>{r.repo}</a> ({r.saves})
+                  </span>
+                ))}
+                .
+              </>
+            )}
+          </p>
+        </>
       )}
 
       <h2>By day</h2>

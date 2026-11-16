@@ -20,7 +20,7 @@ export default function Privacy() {
       eyebrow="Privacy"
       title="Privacy policy"
       lead="Short version: no passwords or profiles, no tracking cookies from gitmanual, and nothing that identifies you is stored unless you sign in with GitHub. Some pages show one ad from Carbon."
-      updated="12 November 2026"
+      updated="16 November 2026"
     >
       <h2>What gitmanual stores</h2>
       <ul>
@@ -59,10 +59,12 @@ export default function Privacy() {
 
       <h2>Signing in with GitHub</h2>
       <p>
-        Signing in is optional: it&apos;s needed only for chat, an API key or your private repos. When you sign in, gitmanual keeps your
+        Signing in is optional: it&apos;s needed only for chat, an API key, saving repos or your private repos. When you sign in, gitmanual keeps your
         GitHub username and account number, when you first and last signed in or used chat, and how many times you&apos;ve signed in. For
         each chat answer and each new written guide it keeps the day, what it cost and which public repo it was about, but not your question
-        or its answer, which are deleted after an hour. Nothing else: no email address, and signing in gives gitmanual no access to your repos. To have your record deleted,
+        or its answer, which are deleted after an hour. If you save repos, it keeps which public repos you saved, the computer and status
+        you picked (to try, installed, dropped), the latest release when you saved each one, and when; only you can see that list, and
+        removing a repo deletes it. Nothing else: no email address, and signing in gives gitmanual no access to your repos. To have your record deleted,
         ask through the contact form.
       </p>
 
@@ -83,7 +85,8 @@ export default function Privacy() {
 
       <h2>What stays in your browser</h2>
       <p>
-        gitmanual sets no cookies unless you sign in with GitHub or connect it for a private repo (above). After you answer &ldquo;Did you get it running?&rdquo;, your browser&apos;s local storage remembers your
+        gitmanual sets no cookies unless you sign in with GitHub or connect it for a private repo (above). Signing in also sets a cookie
+        that says only that someone is signed in (no name or account), so the header can show your account menu; signing out removes it. After you answer &ldquo;Did you get it running?&rdquo;, your browser&apos;s local storage remembers your
         answer for that repo, so you aren&apos;t asked twice. If you tick &ldquo;Remember my system&rdquo; when downloading a manual, it
         remembers that system too. It never leaves your device, and clearing your browser&apos;s site data removes
         it.{PRO && (

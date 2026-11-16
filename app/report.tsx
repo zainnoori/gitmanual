@@ -16,7 +16,7 @@ import { hasDownload } from "@/lib/facets";
 import { addonLinks, installChoices, venvFolder, withVenv, type Arch, type Asset, type InstallKind, type InstallOptions } from "@/lib/install";
 import { OS_LABEL, OS_LIST, OS_SLUG, type OS } from "@/lib/os";
 import { buildScript } from "@/lib/script";
-import { proUrl } from "@/lib/site";
+import { proUrl, SIGNED_IN_COOKIE } from "@/lib/site";
 // import { FlowMap } from "./flow"; — the route diagram, off the page for now
 import { disconnect, fetchPrivate, PrivateAccess } from "./private";
 import { CarbonAd } from "./carbon";
@@ -472,13 +472,17 @@ function Report({
       <header className="sheet-head">
         <div>
           <p className="eyebrow">{osPage ? `How to install on ${OS_LABEL[os]}` : "Assembly instructions"}</p>
-          <h1 className="display-md repo-title" translate="no">
-            <a href={meta.htmlUrl} target="_blank" rel="noreferrer">
-              <span className="owner">{meta.fullName.split("/")[0]}/</span>
-              <wbr />
-              {meta.fullName.split("/")[1]}
-            </a>
-          </h1>
+          {/* The title, with Save (a bookmark) at its end: saving is about the repo, the PDF below is about the manual. */}
+          <div className="title-row">
+            <h1 className="display-md repo-title" translate="no">
+              <a href={meta.htmlUrl} target="_blank" rel="noreferrer">
+                <span className="owner">{meta.fullName.split("/")[0]}/</span>
+                <wbr />
+                {meta.fullName.split("/")[1]}
+              </a>
+            </h1>
+            {!priv && <SaveButton repo={meta.fullName} os={os} />}
+          </div>
           {meta.description && <p className="lead">{meta.description}</p>}
           <div className="chips">
             {/* The language and the GitHub topics open the shelf filtered to the other manuals that share them. */}
@@ -1632,6 +1636,126 @@ function ManualArchitecture({ repo }: { repo: string }) {
   );
 }
 
+// Save to /profile/saved. Signed out, it signs in with GitHub and comes back with ?save=1, which saves it.
+type SaveState = { login: string | null; save: { status: string } | null };
+
+function SaveButton({ repo, os }: { repo: string; os: OS }) {
+  const [state, setState] = useState<SaveState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  const tipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => void (tipTimer.current && clearTimeout(tipTimer.current)), []);
+
+  const send = async (method: "POST" | "DELETE", body: Record<string, unknown>) => {
+    setBusy(true);
+    setError(null);
+    const r = await fetch("/api/saved", { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ repo, ...body }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => ({})) : {};
+    setBusy(false);
+    if (!r?.ok) return setError(j.error ?? "Couldn't save that right now.");
+    setState({ login: j.login, save: j.save });
+    // Just saved: a note under the bookmark for a few seconds, with the way to the list.
+    if (tipTimer.current) clearTimeout(tipTimer.current);
+    setJustSaved(method === "POST" && !body.status && Boolean(j.save));
+    tipTimer.current = setTimeout(() => setJustSaved(false), 6000);
+  };
+
+  useEffect(() => {
+    let live = true;
+    // Never signed in here: no need to ask the server, the button is "sign in to save".
+    if (!new RegExp(`(^|; )${SIGNED_IN_COOKIE}=`).test(document.cookie)) {
+      setState({ login: null, save: null });
+      return;
+    }
+    setState(null);
+    fetch(`/api/saved?repo=${encodeURIComponent(repo)}`, { cache: "no-store" })
+      .then((r) => r.json())
+      .then(async (j: SaveState) => {
+        if (!live) return;
+        setState({ login: j.login ?? null, save: j.save ?? null });
+        // Back from signing in to save it.
+        const q = new URLSearchParams(window.location.search);
+        if (q.get("save") === "1") {
+          q.delete("save");
+          history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}${window.location.hash}`);
+          if (j.login && !j.save) await send("POST", { os });
+        }
+      })
+      .catch(() => live && setState({ login: null, save: null }));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per repo
+  }, [repo]);
+
+  // "It works" on a saved repo: it's installed now.
+  useEffect(() => {
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ repo: string; os: OS }>).detail;
+      if (d.repo === repo && state?.save && state.save.status !== "installed") send("POST", { os: d.os, status: "installed" });
+    };
+    window.addEventListener("gitmanual:worked", on);
+    return () => window.removeEventListener("gitmanual:worked", on);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- send only reads repo
+  }, [repo, state]);
+
+  if (!state)
+    return (
+      <span className="save-wrap">
+        <button type="button" className="save-btn" disabled aria-busy="true" aria-label="Save">
+          <BookmarkIcon />
+        </button>
+      </span>
+    );
+  if (!state.login) {
+    const back = typeof window === "undefined" ? `/${repo}` : `${window.location.pathname}?save=1`;
+    return (
+      <span className="save-wrap">
+        <a className="save-btn" href={`/api/github/connect?signin=1&back=${encodeURIComponent(back)}`} aria-label="Save (sign in with GitHub)" title="Save it: sign in with GitHub">
+          <BookmarkIcon />
+        </a>
+      </span>
+    );
+  }
+  const saved = Boolean(state.save);
+  return (
+    <span className="save-wrap">
+      <button
+        type="button"
+        className={`save-btn${saved ? " on" : ""}`}
+        aria-pressed={saved}
+        aria-label={saved ? "Saved" : "Save"}
+        disabled={busy}
+        onClick={() => (saved ? send("DELETE", {}) : send("POST", { os }))}
+        title={saved ? "Saved. Press to remove it from your saved repos" : "Save to your saved repos"}
+      >
+        <BookmarkIcon filled={saved} />
+      </button>
+      {error ? (
+        <span className="save-tip error" role="alert">
+          {error}
+        </span>
+      ) : (
+        justSaved &&
+        saved && (
+          <span className="save-tip" role="status">
+            Saved ✓ · <Link href="/profile/saved">Your saved repos →</Link>
+          </span>
+        )
+      )}
+    </span>
+  );
+}
+
+function BookmarkIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+      <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4.5L5 21V4a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+
 function DownloadIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1880,6 +2004,8 @@ function DidItWork({ repo, os, votes, onVotes }: { repo: string; os: OS; votes: 
     if (!res.ok) return;
     const data = await res.json();
     const v = worked ? "worked" : "stuck";
+    // A saved repo that works moves to "Installed" (SaveButton listens).
+    if (worked) window.dispatchEvent(new CustomEvent("gitmanual:worked", { detail: { repo, os } }));
     localStorage.setItem(storeKey, v);
     setVoted(v);
     onVotes(data.votes);

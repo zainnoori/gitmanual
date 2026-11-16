@@ -12,5 +12,9 @@ export const sitePath = (path: string | null | undefined) => (path && /^\/(?!\/)
 // "Get Pro" from a page: /pro remembers it and, once the person has Pro, takes them back there.
 export const proUrl = (back?: string | null) => (sitePath(back) ? `/pro?back=${encodeURIComponent(back!)}` : "/pro");
 
+// "Someone is signed in here": just "1", no name or id, so the header knows to ask /api/account who (the sign-in
+// cookie itself only goes to /api and can't be read by the page). Set at sign-in, removed at sign-out.
+export const SIGNED_IN_COOKIE = "gm_in";
+
 // Set for Pro accounts so the browser hides ads (lib/adfree.ts writes it, app/carbon.tsx and the layout read it).
 export const AD_FREE_COOKIE = "gm_noads";

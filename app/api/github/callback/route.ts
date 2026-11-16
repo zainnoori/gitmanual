@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { markAdFree } from "@/lib/adfree";
 import { seeUser } from "@/lib/db";
 import { proFor } from "@/lib/pro";
-import { cookieOptions, exchangeCode, githubApp, safeBack, seal, SESSION_COOKIE, STATE_COOKIE } from "@/lib/session";
+import { cookieOptions, exchangeCode, githubApp, hintOptions, safeBack, seal, SESSION_COOKIE, STATE_COOKIE } from "@/lib/session";
+import { SIGNED_IN_COOKIE } from "@/lib/site";
 
 // GitHub comes back here after the visitor installs the app or changes its repos (the app's Callback and Setup URL).
 // Installing also signs them in (a code to trade for their access); changing repos doesn't, so that goes through
@@ -36,6 +37,7 @@ export async function GET(req: Request) {
       if (pro) markAdFree(res, pro, subscription?.periodEnd);
     }
     res.cookies.set(SESSION_COOKIE, seal(session), cookieOptions());
+    res.cookies.set(SIGNED_IN_COOKIE, "1", hintOptions());
     res.cookies.delete({ name: STATE_COOKIE, path: "/api" });
     return res;
   } catch {
