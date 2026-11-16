@@ -11,7 +11,7 @@ const DESCRIPTION = "Browse the open-source repos people have set up with gitman
 export async function generateMetadata({ searchParams }: { searchParams: Promise<Params> }): Promise<Metadata> {
   const p = await searchParams;
   const page = Math.max(1, Number(p.page) || 1);
-  const filtered = Boolean(p.q || p.lang || p.level || p.min || p.rising || (p.sort && p.sort !== "stars"));
+  const filtered = Boolean(p.q || p.topic || p.lang || p.level || p.min || p.rising || (p.sort && p.sort !== "stars"));
   return {
     title: page > 1 ? `The shelf, page ${page}` : "The shelf: open-source repos people set up",
     description: DESCRIPTION,
@@ -29,6 +29,7 @@ function parse(p: Params): ShelfQuery {
   return {
     q: p.q?.trim().slice(0, 80) || undefined,
     language: p.lang || undefined,
+    topic: /^[a-z0-9-]{1,50}$/i.test(p.topic ?? "") ? p.topic!.toLowerCase() : undefined,
     difficulty: ["Easy", "Moderate", "Involved"].includes(p.level ?? "") ? p.level : undefined,
     minStars: Number.isFinite(minStars) && minStars > 0 ? minStars : undefined,
     sort: SORTS.includes(p.sort as (typeof SORTS)[number]) ? (p.sort as ShelfQuery["sort"]) : "stars",
@@ -48,7 +49,7 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
     next.set("page", String(n));
     return `/shelf?${next}`;
   };
-  const filtered = Boolean(query.q || query.language || query.difficulty || query.minStars || query.rising);
+  const filtered = Boolean(query.q || query.topic || query.language || query.difficulty || query.minStars || query.rising);
   // The All / Rising switch keeps the other filters and starts again at page 1.
   const viewHref = (risingOnly: boolean) => {
     const next = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => Boolean(e[1])));
@@ -87,6 +88,7 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
 
       <p className="shelf-count" aria-live="polite">
         {total.toLocaleString()} {total === 1 ? "repo" : "repos"}
+        {query.topic && <> tagged <b>#{query.topic}</b></>}
         {filtered && (
           <>
             {" · "}

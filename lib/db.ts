@@ -516,6 +516,7 @@ function toCard(r: Record<string, unknown>): RepoCard {
 export type ShelfQuery = {
   q?: string;
   language?: string;
+  topic?: string; // a GitHub topic, from the "#tag" links on a manual
   difficulty?: string;
   minStars?: number;
   sort?: "stars" | "recent" | "popular" | "worked";
@@ -548,6 +549,10 @@ export function browseRepos(
     if (query.language) {
       where.push("r.language = ?");
       args.push(query.language);
+    }
+    if (query.topic) {
+      where.push("r.facets LIKE ?");
+      args.push(`% t:${query.topic} %`);
     }
     if (query.difficulty) {
       where.push("r.difficulty = ?");
