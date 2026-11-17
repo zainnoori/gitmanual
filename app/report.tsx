@@ -93,8 +93,10 @@ const LOADING_LINES = ["Opening the box…", "Reading the README…", "Counting 
 export type { Result as ReportData };
 
 export function defaultMode(r: Result): Mode {
-  // Device-only downloads (.apk) are usually extras; the computer-side setup is the main path then.
-  return r.install.platforms.length || r.install.commands.length ? "install" : "source";
+  // Device-only downloads (.apk) are usually extras; the computer-side setup is the main path then. Unless our
+  // steps are only "clone it": then the .apk is the way in.
+  const apkOnly = !!r.install.release?.deviceAssets.length && Object.values(r.analysis.steps).every((s) => s.length <= 1);
+  return r.install.platforms.length || r.install.commands.length || apkOnly ? "install" : "source";
 }
 
 // Without a server key, "Still stuck?" hands the manual to the visitor's own AI chat: the prompt goes in the link,
@@ -1946,7 +1948,10 @@ function StartHere({
     ...(guides.doc
       ? [{ id: "guide", tag: "Setup guide", title: `Read the maintainers' ${guides.doc.label.toLowerCase()}`, sub: guides.doc.path, go: () => onGo("maintainer-guide", "source") }]
       : []),
-    { id: "steps", tag: "Steps", title: `Follow our ${steps} steps`, sub: `Copy-paste commands for ${OS_LABEL[os]}.`, go: () => onGo("our-steps", "source") },
+    // One step is only "clone it": not worth a door when there's a better way in.
+    ...(steps > 1 || (!way && !guides.doc)
+      ? [{ id: "steps", tag: "Steps", title: `Follow our ${steps} ${steps === 1 ? "step" : "steps"}`, sub: `Copy-paste commands for ${OS_LABEL[os]}.`, go: () => onGo("our-steps", "source") }]
+      : []),
     ...(guides.website ? [{ id: "website", tag: "Website ↗", title: host(guides.website), sub: "The project's own site.", href: guides.website }] : []),
     ...(guides.docs ? [{ id: "docs", tag: "Docs ↗", title: host(guides.docs), sub: "Linked from the README.", href: guides.docs }] : []),
     ...(guides.devcontainer

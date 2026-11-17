@@ -9,7 +9,7 @@ import { declaredPlatforms, mentions } from "./platforms";
 import { platformFiles, platformOnly } from "./platform";
 
 // Bump when the analysis output changes shape or rules, so saved copies are re-analyzed instead of shown.
-const VERSION = 13; // 13: "made for one system" (lib/platform.ts) in the will-it-work answer
+const VERSION = 14; // 14: build-only Dockerfiles, Android APK releases in the will-it-work answer
 
 export type RepoData = {
   version: number;

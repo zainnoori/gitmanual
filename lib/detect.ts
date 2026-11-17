@@ -661,17 +661,29 @@ export function analyze(
   if (composePath) services.push(...servicesFromCompose(files[composePath], composePath));
   if (files["Dockerfile"]) {
     const base = firstMatch(files["Dockerfile"], /^FROM\s+(?:--\S+\s+)*(\S+)/im);
-    hints.push(`Dockerfile available${base ? ` (base image: ${base})` : ""}.`);
-    if (stacks.length === 0) {
+    // The README's own build and run, when it has a pair that go together (its run usually shows how to give the
+    // container its input, like "< file.pdf > output.md").
+    const lines = [...readmeAll.matchAll(/^[ \t]*(?:\$\s*)?(docker (?:build|run)\b[^\n`]*)/gm)].map((m) => m[1].trim().replace(/\s*\\$/, ""));
+    const build = lines.find((l) => /^docker build\b.*\s(-t|--tag)\s+\S+.*\s\.$|^docker build\b.*\s\.\s.*(-t|--tag)\s+\S+/.test(l));
+    const image = build?.match(/(?:-t|--tag)\s+([^\s:]+)/)?.[1];
+    const run = image && lines.find((l) => /^docker run\b/.test(l) && l.split(/\s+/).some((w) => w.split(":")[0] === image));
+    const pair = build && run && build.length <= 160 && run.length <= 200 ? [build, run] : null;
+    // Without that pair, a Dockerfile with no start command, no port and a base image that doesn't bring one (nginx
+    // and the like do) is a build environment, like an Android SDK image that patches an APK: "docker run" on it
+    // starts nothing useful.
+    const last = [...files["Dockerfile"].matchAll(/^FROM\s+(?:--\S+\s+)*(\S+)/gim)].at(-1)?.[1] ?? "";
+    const buildOnly =
+      !pair &&
+      !/^\s*(CMD|ENTRYPOINT|EXPOSE)\b/im.test(files["Dockerfile"]) &&
+      !/(^|\/)(nginx|httpd|caddy|apache|traefik|haproxy|tomcat|jetty|postgres|mysql|mariadb|redis|mongo)\b/i.test(last);
+    hints.push(
+      buildOnly
+        ? `Its Dockerfile is a build environment${base ? ` (base image: ${base})` : ""}: it has no start command, so Docker builds the project but doesn't run it.`
+        : `Dockerfile available${base ? ` (base image: ${base})` : ""}.`,
+    );
+    if (stacks.length === 0 && !buildOnly) {
       stacks.push("Docker");
-      // The README's own build and run, when it has a pair that go together (its run usually shows how to give the
-      // container its input, like "< file.pdf > output.md"); otherwise a plain build and an interactive run.
-      const lines = [...readmeAll.matchAll(/^[ \t]*(?:\$\s*)?(docker (?:build|run)\b[^\n`]*)/gm)].map((m) => m[1].trim().replace(/\s*\\$/, ""));
-      const build = lines.find((l) => /^docker build\b.*\s(-t|--tag)\s+\S+.*\s\.$|^docker build\b.*\s\.\s.*(-t|--tag)\s+\S+/.test(l));
-      const image = build?.match(/(?:-t|--tag)\s+([^\s:]+)/)?.[1];
-      const run = image && lines.find((l) => /^docker run\b/.test(l) && l.split(/\s+/).some((w) => w.split(":")[0] === image));
-      if (build && run && build.length <= 160 && run.length <= 200) runCmds.push(build, run);
-      else runCmds.push(`docker build -t ${repo.repo.toLowerCase()} .`, `docker run --rm -it ${repo.repo.toLowerCase()}`);
+      runCmds.push(...(pair ?? [`docker build -t ${repo.repo.toLowerCase()} .`, `docker run --rm -it ${repo.repo.toLowerCase()}`]));
     }
   }
   if (files[".devcontainer/devcontainer.json"] || files[".devcontainer.json"]) {

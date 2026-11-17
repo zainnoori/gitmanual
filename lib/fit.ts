@@ -72,6 +72,14 @@ export function fitCheck(a: Analysis, install: InstallOptions, os: OS, arch: Arc
     return { status: "yes", headline: `Yes, it installs on your ${name}`, reasons };
   }
 
+  // Nothing to install on this computer, but the release has an Android app: it runs on the phone, not here.
+  const apks = install.release?.deviceAssets ?? [];
+  if (apks.length && !install.platforms.includes(os)) {
+    reasons.push(`It's an Android app: the latest release has a ready-made .apk. Download it on your Android device, or install it from your ${name} with adb.`);
+    if (a.compatibility) reasons.push(`The README lists supported devices under “${a.compatibility.heading}”. Find yours there first.`);
+    return { status: "yes", headline: "Yes, on your Android device", reasons };
+  }
+
   if (assets.length && arch) {
     reasons.push(`There are ${name} downloads, but none built for your chip. Building from source usually still works.`);
     return { status: "maybe", headline: "Probably, from source", reasons };
