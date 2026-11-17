@@ -1331,7 +1331,7 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
   return (
     <>
       <button type="button" className="btn dl-toggle" onClick={open} aria-haspopup="dialog">
-        <DownloadIcon /> Download PDF manual
+        <PdfIcon /> Download PDF manual
       </button>
       <dialog
         ref={dialog}
@@ -1760,6 +1760,18 @@ function DownloadIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
+    </svg>
+  );
+}
+
+// The PDF button's icon: a page in wrench orange with its corner folded and an arrow down, so it reads as "a document
+// to take with you" rather than a plain download.
+function PdfIcon() {
+  return (
+    <svg className="pdf-icon" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M5 1.75h7.25L16 5.5v11.75a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V2.75a1 1 0 0 1 1-1z" fill="var(--wrench)" />
+      <path d="M12.25 1.75V5.5H16" fill="var(--sheet)" />
+      <path d="M10 8.5v6M7.5 12l2.5 2.5 2.5-2.5" stroke="var(--ink)" strokeWidth="1.7" />
     </svg>
   );
 }

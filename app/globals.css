@@ -1883,7 +1883,7 @@ a.insp-ev:hover { color: var(--ink); }
   .report > .alts { order: 4; }
   .report > .start { order: 5; }
   /* The PDF right under "Start here", so it's on the first screens and not after everything. */
-  .report > .sheet-head > div:first-child > .dl-toggle { order: 6; justify-self: start; align-self: flex-start; margin-top: 14px; }
+  .report > .sheet-head > div:first-child > .dl-toggle { order: 6; align-self: stretch; justify-content: center; min-height: 46px; margin-top: 14px; } /* full width: an easy thumb target */
   .report .ad-head { order: 7; margin-top: 18px; }
   .report > .sheet { order: 8; margin-top: 18px; }
   .report > .stamp-line { order: 9; margin-top: 18px; }
