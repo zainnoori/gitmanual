@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BudgetError, PRICES, release, reserve, settle } from "../budget";
+import { BudgetError, PRICES, release, reserve, settle, type PoolName } from "../budget";
 import { getInspection, hasRepo, repoKey, saveInspection } from "../db";
 import { paidAiServices } from "../facts";
 import type { RepoRef } from "../github";
@@ -98,14 +98,14 @@ function coverage(facts: Facts, files: { files: Record<string, string>; paths: s
   };
 }
 
-export async function build(ref: RepoRef, account: string): Promise<Inspection> {
+export async function build(ref: RepoRef, account: string, pool: PoolName = "inspection"): Promise<Inspection> {
   const key = repoKey(ref.owner, ref.repo);
   // Held before anything is fetched: the most this report's Claude call can cost (about 3 characters a token).
   const price = PRICES[MODEL];
   const worst = Math.ceil(MAX_PROMPT_TOKENS * price.input + MAX_OUTPUT * price.output);
   let reservation;
   try {
-    reservation = await reserve({ pool: "inspection", account, requestId: randomUUID(), model: MODEL, repo: key, amount: worst });
+    reservation = await reserve({ pool, account, requestId: randomUUID(), model: MODEL, repo: key, amount: worst });
   } catch (e) {
     if (!(e instanceof BudgetError)) throw e;
     const message =

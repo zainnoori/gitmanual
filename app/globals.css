@@ -1919,6 +1919,17 @@ a.insp-ev:hover { color: var(--ink); }
 .parts-only .link { font-size: inherit; }
 .chat-fab.small .chat-fab-text { display: none; }
 .chat-fab.small:hover .chat-fab-text, .chat-fab.small:focus-visible .chat-fab-text { display: inline; }
+/* The free Deep Inspection preview in the sidebar: real verdict and counts, one finding in full, the rest locked. */
+.insp-strip-bar { display: grid; gap: 6px; }
+.insp-strip-bar .insp-preview-counts { margin: 0; }
+.insp-free .insp-strip-list { display: grid; gap: 8px; margin: 2px 0 0; padding: 0; list-style: none; }
+.insp-free .insp-strip-list li { display: flex; align-items: flex-start; gap: 7px; font-size: var(--fs-small); line-height: 1.4; }
+.insp-strip-list li .sev { flex: none; margin-top: 2px; }
+.insp-strip-list b { font-weight: 700; }
+.insp-strip-locked i { display: block; flex: none; height: 10px; margin-top: 4px; border-radius: 6px; background: var(--line-strong); filter: blur(1.5px); }
+.insp-strip-foot { display: grid; gap: 6px; }
+.insp-strip-foot .note { font-size: var(--fs-meta); }
+
 /* Save: a bookmark at the end of the repo title, filled yellow once saved; a short note under it after saving. */
 .title-row { display: flex; align-items: flex-start; gap: 14px; }
 .title-row .repo-title { flex: 0 1 auto; min-width: 0; }

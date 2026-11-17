@@ -178,6 +178,37 @@ export function fixFirst(report: Inspection, max = 5): Finding[] {
   return counted(report).filter((x) => bucketOf(x) === "improvement").sort((a, b) => riskClass(a) - riskClass(b) || levelRank[a.level] - levelRank[b.level]).slice(0, 3);
 }
 
+// The free preview on a manual (people without Pro): the real verdict and counts, the first thing to look at in
+// full, and only the kind of the next ones. Built on the server, so the locked findings never reach the browser.
+export type Teaser = {
+  tone: "no" | "maybe" | "yes";
+  title: string;
+  counts: { blocker: number; important: number; improvement: number; pass: number };
+  checks: number;
+  first: { title: string; text: string; bucket: Bucket } | null;
+  locked: Bucket[]; // the next findings on the list, by kind only
+  more: number; // how many other concerns the full report lists
+  scannedAt: number;
+  commit: string | null;
+};
+export function teaser(report: Inspection): Teaser {
+  const v = verdict(report);
+  const t = triage(report);
+  const top = fixFirst(report, 3);
+  const concerns = t.blocker + t.important + t.improvement;
+  return {
+    tone: v.tone,
+    title: v.title,
+    counts: { blocker: t.blocker, important: t.important, improvement: t.improvement, pass: t.pass },
+    checks: counted(report).length,
+    first: top[0] ? { title: top[0].title, text: top[0].text, bucket: bucketOf(top[0]) } : null,
+    locked: top.slice(1).map(bucketOf),
+    more: Math.max(0, concerns - top.length),
+    scannedAt: report.scannedAt,
+    commit: report.scope?.commit ?? null,
+  };
+}
+
 // One row per package: the worst severity, how many advisories, and the version that fixes all the known ones.
 const cmpVersion = (a: string, b: string) => {
   const [x, y] = [a.replace(/^v/, "").split(/[.+-]/), b.replace(/^v/, "").split(/[.+-]/)];
