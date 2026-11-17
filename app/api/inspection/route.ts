@@ -4,13 +4,15 @@ import { countInterest } from "@/lib/db";
 import { firstTime, visitor } from "@/lib/limit";
 import { parseRepoUrl } from "@/lib/github";
 import { inspect, InspectionError, saved } from "@/lib/inspection";
+import { teaser } from "@/lib/inspection/labels";
 import { isPro } from "@/lib/pro";
 import { PRO_ENABLED } from "@/lib/stripe";
 import { viewer } from "@/lib/viewer";
 
 // Deep Inspection (Pro). Never cached by the CDN: the report is for Pro members only.
 //   GET  ?repo=owner/name → { signedIn, login, pro, left, inspection | null, fresh } (the saved report, if any; nothing
-//        is built). &view=1 when the inspection page itself asks: a signed-in member without Pro then counts as
+//        is built). Without Pro: { ..., inspection: null, teaser } instead, the free preview of a saved report
+//        (lib/inspection/labels.ts teaser: verdict, counts and the first finding; the rest stays on the server). &view=1 when the inspection page itself asks: a signed-in member without Pro then counts as
 //        interest in Deep Inspection for that repo (once each), like the PDF download does.
 //   POST { repo, rescan? } → { inspection, fresh } (builds one when there's no fresh report, or on rescan)
 export const maxDuration = 90; // a new report reads GitHub and several other services, then asks Claude
@@ -32,7 +34,8 @@ export async function GET(req: Request) {
       const repo = `${ref.owner}/${ref.repo}`;
       if (await firstTime(`interest:inspection:${repo.toLowerCase()}`, visitor(req.headers))) await countInterest("inspection", repo);
     }
-    return settle(NextResponse.json({ signedIn: Boolean(user), login: user?.login ?? null, pro: false, inspection: null }, { headers }));
+    const s = await saved(ref).catch(() => null);
+    return settle(NextResponse.json({ signedIn: Boolean(user), login: user?.login ?? null, pro: false, inspection: null, teaser: s ? teaser(s.inspection) : null }, { headers }));
   }
   const [s, left] = await Promise.all([saved(ref), allowance("inspection", String(user!.id))]);
   return settle(NextResponse.json({ signedIn: true, pro: true, left: left ? left.limit - left.used : null, inspection: s?.inspection ?? null, fresh: s?.fresh ?? false }, { headers }));

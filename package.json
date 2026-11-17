@@ -37,6 +37,7 @@
     "pdf:install": "if [ -n \"$GH_TOKEN\" ]; then npm install --no-save \"git+https://${GH_TOKEN}@github.com/zainudinnoori/gitmanual-pdf.git#v1.0.0\"; else echo 'GH_TOKEN not set: building without the PDF design'; fi",
     "stripe:setup": "node --env-file-if-exists=.env.local --import tsx scripts/stripe-setup.ts",
     "chat:eval": "node --env-file-if-exists=.env.local --import tsx scripts/chat-eval.ts",
+    "inspect:top": "node --env-file-if-exists=.env.local --import tsx scripts/prerun-inspections.ts",
     "accuracy:sample": "node --import tsx scripts/make-accuracy-sample.ts"
   },
   "dependencies": {

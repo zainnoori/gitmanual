@@ -16,7 +16,17 @@ const lib = (path: string) => new URL(`../lib/${path}`, import.meta.url).href;
 let signedIn: { id: number; login: string } | null = null;
 const proUsers = new Set<number>();
 const built: string[] = [];
-const REPORT = { repo: "acme/tool", grades: { overall: "B" } };
+const REPORT = {
+  repo: "acme/tool",
+  grades: { overall: "B" },
+  scannedAt: 1,
+  scope: { commit: "abc1234def", archive: true },
+  findings: [
+    { id: "setup.db", section: "services", level: "risk", status: "concern", priority: "blocker", title: "Needs Postgres", text: "The README skips it." },
+    { id: "secrets.key", section: "secrets", level: "risk", status: "concern", priority: "important", title: "SECRET-TITLE", text: "SECRET-TEXT" },
+    { id: "license.ok", section: "license", level: "good", status: "pass", title: "MIT", text: "Permissive." },
+  ],
+};
 
 mock.module(lib("viewer.ts"), { exports: { viewer: async () => ({ user: signedIn && { ...signedIn, token: "t" }, settle: (r: unknown) => r }), isAdmin: () => false } });
 mock.module(lib("pro.ts"), { exports: { isPro: async (id: number) => proUsers.has(id), proFor: async () => ({ pro: false, subscription: null }) } });
@@ -40,7 +50,14 @@ const post = async () => {
 
 test("signed out: no report, and inspecting asks for sign-in", async () => {
   signedIn = null;
-  assert.deepEqual(await get(), { signedIn: false, login: null, pro: false, inspection: null });
+  const g = await get();
+  assert.equal(g.inspection, null);
+  // The free preview: real verdict and counts, the first finding in full, the next one by kind only.
+  assert.equal(g.teaser.tone, "no");
+  assert.deepEqual(g.teaser.counts, { blocker: 1, important: 1, improvement: 0, pass: 1 });
+  assert.equal(g.teaser.first.title, "Needs Postgres");
+  assert.deepEqual(g.teaser.locked, ["important"]);
+  assert.ok(!JSON.stringify(g).includes("SECRET"), "locked findings never leave the server");
   const r = await post();
   assert.equal(r.status, 401);
   assert.equal(built.length, 0);
