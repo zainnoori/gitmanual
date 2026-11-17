@@ -41,14 +41,21 @@ Plenty of people find a great project on GitHub and don't know how to run it. RE
 
 ![The manual for ollama/ollama](docs/manual.png)
 
+- **Before you start**: three quick answers. Is it free (its license)? Is it still maintained? How widely is it used?
 - **Start here**: the best way in for your system. The options are a ready-made download, the maintainers' own setup guide (shown inline), the project's website and docs, a setup script, or GitHub Codespaces when the repo ships a dev container.
-- **Will it work on my device?**: a yes, maybe or no for your system and chip, with reasons. It's based on the release files, install commands, Windows/WSL needs, separate devices (phones, TVs), Docker and library setups, and what the README itself says about supported systems.
+- **Will it work on my device?**: a yes, maybe or no for your system and chip, with reasons. It's based on the release files, install commands, Windows/WSL needs, separate devices (phones, TVs), Docker and library setups, and what the README itself says about supported systems. Projects made for one system only (a Windows dock, a macOS menu-bar app, a Wayland compositor) are recognised, and visitors on other systems are pointed to the right setup or to **similar projects that do run on theirs**.
 - **Parts list**: runtimes and versions, tools, package managers, databases and `.env` settings.
 - **Assembly steps**: copy-paste commands for macOS (zsh), Windows (PowerShell) or Linux (bash), with fixes for the errors people hit most.
 - **Setup script**: the same steps as one `setup.sh` or `setup.ps1` (`/owner/repo/setup/mac.sh`, `linux.sh`, `windows.ps1`). It stops at the first error, skips what's already installed and is safe to run again. It never starts servers or runs commands that still need your own values; it lists those at the end.
 - **Install it**: the right download for your system and CPU, plus Homebrew, winget, apt, Docker and other commands taken from the README.
 - **Did you get it running?**: per-system votes, so the next person knows what to expect.
-- **Still stuck?**: "Ask Claude" and "Ask ChatGPT" open a chat with the repo, your system and the manual's steps already filled in, using your own account. With an `ANTHROPIC_API_KEY`, the site writes the guide itself instead (once per repo and system, then cached).
+- **Ask about this repo**: a chat on the manual that answers setup questions from the repo's own files, for people signed in with GitHub. Without it, "Ask Claude" and "Ask ChatGPT" open a chat with the repo, your system and the steps already filled in, using your own account.
+- **Write my guide**: with an `ANTHROPIC_API_KEY`, a full walkthrough for your computer, written once per repo and system, then cached.
+- **Save** (the bookmark beside the title): keep repos at [`/profile/saved`](https://gitmanual.com/profile/saved), marked to try, installed or dropped, with a dot when a saved repo has a new release.
+- **Download**: the manual as a print-ready PDF (Pro) or a Markdown file.
+- **Deep Inspection preview**: when the repo has been inspected, the verdict, the counts and the most important finding, free. See [GitManual Pro](#gitmanual-pro).
+
+Language and topic tags open the shelf filtered to repos that share them.
 
 **Maintainers:** add a badge to your README so newcomers find the steps. Swap in your `owner/repo`:
 
@@ -70,9 +77,19 @@ The same facts are available as JSON at `/api/v1/manual?repo=owner/repo` (`&os=`
 
 ![Ask AI on a GitHub repo opens the side panel, where GitManual AI Agent answers how to install it on macOS and flags the risky command](docs/extension-demo.gif)
 
-Plus **the shelf** (`/shelf`): every repo people have looked up, with search and filters for stars, language and difficulty. Every repo also gets a share image and a 1080×1080 poster.
+Plus **the shelf** (`/shelf`): every repo people have looked up, with search and filters for stars, language, topic and difficulty, and **lists** (`/lists`): themed collections per system, such as self-hosted apps or AI tools that run on Windows, kept up to date from the shelf. Every repo also gets a share image and a 1080×1080 poster.
 
 <p align="center"><img src="docs/shelf.png" width="49%" alt="The shelf" /> <img src="docs/how.png" width="49%" alt="How it works" /></p>
+
+## GitManual Pro
+
+Everything above stays free. [Pro](https://gitmanual.com/pro) is a paid plan that keeps it that way:
+
+- **Deep Inspection**: a report on a repo before you rely on it. Setup steps the README leaves out, settings it doesn't document, license terms, exposed secrets, known vulnerabilities in its dependencies, who controls it and whether it's still alive. Every finding links to the file or service it came from.
+- **The AI helper without a daily limit**, on the site and in the browser extension, and 20 written guides a day instead of 1.
+- **PDF manuals** to print or share, **no ads**, and bigger API limits.
+
+Pro is off unless `PRO_ENABLED=on` (see [Configuration](#configuration)), so a self-hosted copy runs without payments.
 
 ## How it works
 
@@ -104,7 +121,13 @@ Open <http://localhost:3000> and paste a repo. Without any settings it works out
 | `npm run dev` | Development server |
 | `npm run build` / `npm start` | Production build and server |
 | `npm run typecheck` | Type check |
+| `npm test` | Tests (Node's test runner, against a throwaway database) |
 | `npm run check:scripts` | Build and check the setup script of every repo in the local database (`-- --add` also analyzes the test list) |
+| `npm run inspect:top` | Deep Inspection reports ahead of time for the most-viewed repos (`-- --top 50`, `-- --dry`) |
+| `npm run chat:eval` | Check the repo chat's answers against a fixed set of questions |
+| `npm run stripe:setup` | Create the Pro product and prices in your Stripe account, once |
+| `npm run db:push` | Copy the local SQLite history into a Turso database |
+| `npm run extension:zip` | Package the browser extension for the store |
 
 ## Configuration
 
@@ -115,13 +138,18 @@ All settings are environment variables, and every one is optional for local use.
 | `GITHUB_TOKEN` | GitHub API limit 60 → 5,000 requests/hour. **Needed in production** |
 | `NEXT_PUBLIC_SITE_URL` | The site's address, for canonical links, the sitemap and share images. **Needed in production** |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | Hosted database for history, cache and votes. **Needed in production** (falls back to a local file in development) |
-| `ANTHROPIC_API_KEY` | Optional: "Write my guide" (Claude) instead of the "Ask Claude / ChatGPT" links |
+| `ANTHROPIC_API_KEY` | Optional: "Write my guide", the repo chat and Deep Inspection (Claude) |
+| `CHAT_ENABLED`, `CHAT_MODEL` | Optional: `CHAT_ENABLED=on` turns on "Ask about this repo" (needs the key, the GitHub App and a database). `CHAT_MODEL` picks the model |
+| `PRO_ENABLED`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Optional: [GitManual Pro](#gitmanual-pro) through Stripe. Run `npm run stripe:setup` once and add a webhook at `/api/stripe/webhook` |
+| `NEXT_PUBLIC_CARBON_SERVE`, `NEXT_PUBLIC_CARBON_PLACEMENT` | Optional: one Carbon ad on manual, shelf, list and developer pages (hidden for Pro). `next dev` shows a placeholder |
+| `INDEXNOW_KEY` | Optional: tells Bing and others about each new manual right away |
+| `NEXT_CHROME_EXTENSION_URL`, `PRODUCT_HUNT_URL` | Optional: links to the extension's store page and to a launch page |
 | `NEXT_PUBLIC_REPO_URL` | Your fork's GitHub URL: a GitHub link with stars in the menu, and "Report a wrong setup" |
 | `CONTACT_FORM_URL` | A [ShareText](https://sharetext.net) form's embed link: adds "Contact" to the footer, opening the form over the page |
 | `RATE_LIMITS`, `LIMIT_SALT` | Limits are on by default (new analyses 40/hour per visitor and 1,000/hour in all, new AI guides 5/day and 100/day, votes once per repo and system a day). `RATE_LIMITS=off` turns them off; `LIMIT_SALT` is any random string that keeps visitor codes unguessable |
 | `FINDS_*`, `FB_PAGE_*`, `CRON_SECRET` | Optional [Finds](docs/self-hosting.md#7-optional-finds-from-a-facebook-page) page: posts from a Facebook Page, each linked to its manual |
-| `GITHUB_APP_*`, `SESSION_SECRET` | Optional: "Connect GitHub" for [private repos](#private-repos) and sign-in for free API keys. Without them, visitors can still paste their own read-only token |
-| `ADMIN_GITHUB_LOGINS` | Optional: GitHub usernames who can see and turn off API keys at `/admin/keys` |
+| `GITHUB_APP_*`, `SESSION_SECRET` | Optional: "Connect GitHub" for [private repos](#private-repos), and sign-in for saved repos, the chat, Pro and free API keys. Without them, visitors can still paste their own read-only token |
+| `ADMIN_GITHUB_LOGINS` | Optional: GitHub usernames who can open `/admin`: API keys, chat and AI spend, saves and interest stats |
 
 ### Private repos
 
@@ -153,20 +181,27 @@ The quickest route is **Vercel + Turso** (both have free tiers): create a Turso 
 
 ```
 app/                    Pages and API routes (Next.js App Router)
-  [owner]/[repo]/       The manual, its share image and poster
-  shelf/  finds/  how-it-works/
-  api/                  analyze, guide (Claude), vote, finds, cron/facebook
+  [owner]/[repo]/       The manual, its Deep Inspection page, share image, poster and setup scripts
+  shelf/  lists/  finds/  how-it-works/  developers/  pro/  profile/saved/  admin/
+  api/                  analyze, guide, chat, inspection, saved, account, vote, v1 (public API), stripe, github (sign-in)
+  mcp/                  The MCP server
 lib/
   pipeline.ts           cache → GitHub → analysis → save
   github.ts             GitHub API and raw file downloads
   detect.ts             Stack, versions, services and per-OS steps
   install.ts            Release downloads and README install commands
   readme.ts  guides.ts  README sections, setup guides, scripts, docs links
-  fit.ts  platforms.ts  "Will it work on my device?"
+  fit.ts  platform.ts   "Will it work on my device?", and projects made for one system
+  facts.ts  facets.ts   "Before you start", and the tags the shelf and lists filter by
+  inspection/           Deep Inspection: collect facts, rules, Claude's wording, labels
+  chat.ts  checks.ts    The repo chat and the checks on its answers
+  budget.ts  limit.ts   AI spend caps and rate limits
+  pro.ts  stripe.ts  session.ts  viewer.ts   Pro, payments and GitHub sign-in
   os.ts                 Per-OS installers and PowerShell rewrites
   db.ts                 Turso / SQLite
   og.tsx                Share images and posters
   facebook.ts  picks.ts Optional Finds (Facebook Page sync)
+extension/              The browser extension
 ```
 
 The visual language (an assembly manual: ink outlines, a wrench-orange box, sticker verdicts) is described in [DESIGN.md](DESIGN.md).
