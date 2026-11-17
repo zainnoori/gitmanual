@@ -42,6 +42,9 @@ export const POOLS = {
   // Deep Inspection (Pro): each new or refreshed report reads GitHub and other services and asks Claude (Haiku) to word the
   // findings. A saved report is free to reopen; 50 new ones a day per account, with the site's own daily cap.
   inspection: { answersPerDay: 50, inProgress: 2, dailyUsd: 20 },
+  // Reports made ahead of time for the most-viewed manuals (scripts/prerun-inspections.ts), so the free preview on
+  // those manuals shows real results. About $0.007 each at most on Haiku.
+  inspectionPrerun: { answersPerDay: 300, inProgress: 2, dailyUsd: 3 },
 } satisfies Record<string, Pool>;
 
 export type PoolName = keyof typeof POOLS;

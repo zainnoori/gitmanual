@@ -24,7 +24,7 @@ import { ArchitectureDiagram } from "./inspection-charts";
 import { SevIcon } from "./sev-icon";
 import { GitHubMark } from "./github-mark";
 import type { Inspection } from "@/lib/inspection/types";
-import { BUCKETS, bucketOf, fixFirst, triage, verdict } from "@/lib/inspection/labels";
+import { BUCKETS, bucketOf, fixFirst, triage, verdict, type Teaser } from "@/lib/inspection/labels";
 import { Chat } from "./chat";
 import { CodeBlock, CopyButton, RepoForm, Wrenches, detectArch, detectOS, isPhone } from "./ui";
 
@@ -859,10 +859,10 @@ function Report({
           </div>
           )}
 
-          {!priv && <Contributors fullName={meta.fullName} htmlUrl={meta.htmlUrl} />}
-
-          {/* The Pro teaser after what's useful on its own: parts and the people behind it. */}
+          {/* Deep Inspection after the parts: Pro's report, the free preview of a saved one, or what it would show. */}
           {inspection && !priv && <InspectionCard repo={meta.fullName} />}
+
+          {!priv && <Contributors fullName={meta.fullName} htmlUrl={meta.htmlUrl} />}
 
           {!priv && (
             <div className="side-card">
@@ -1486,7 +1486,7 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
 // manual adds no Claude cost. Pro members without a report get a way to make one; everyone else a locked preview.
 // The saved Deep Inspection for this repo, fetched once for the card and the diagram together. Reading it is free
 // and never starts a new inspection.
-type Saved = { signedIn: boolean; pro: boolean; inspection: Inspection | null };
+type Saved = { signedIn: boolean; pro: boolean; inspection: Inspection | null; teaser: Teaser | null };
 const savedCache = new Map<string, Promise<Saved | null>>();
 function useSavedInspection(repo: string): Saved | null {
   const [state, setState] = useState<Saved | null>(null);
@@ -1497,7 +1497,7 @@ function useSavedInspection(repo: string): Saved | null {
         repo,
         fetch(`/api/inspection?repo=${encodeURIComponent(repo)}`, { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
-          .then((j) => (j ? { signedIn: Boolean(j.signedIn), pro: Boolean(j.pro), inspection: j.inspection ?? null } : null))
+          .then((j) => (j ? { signedIn: Boolean(j.signedIn), pro: Boolean(j.pro), inspection: j.inspection ?? null, teaser: j.teaser ?? null } : null))
           .catch(() => null),
       );
     savedCache.get(repo)!.then((v) => live && setState(v));
@@ -1513,8 +1513,61 @@ function useSavedInspection(repo: string): Saved | null {
 function InspectionCard({ repo }: { repo: string }) {
   const state = useSavedInspection(repo);
   const r = state?.pro ? state.inspection : null;
+  if (!state?.pro && state?.teaser) return <InspectionFree repo={repo} t={state.teaser} />;
   if (!r) return <InspectionTeaser repo={repo} pro={Boolean(state?.pro)} />;
   return <InspectionPreview repo={repo} r={r} />;
+}
+
+// The free preview, for people without Pro on a repo that has a saved report: the real verdict and counts, the first
+// thing to look at in full, the next ones locked (only their kind is known here).
+function InspectionFree({ repo, t }: { repo: string; t: Teaser }) {
+  const segs = (["blocker", "important", "improvement", "pass"] as const).filter((b) => t.counts[b] > 0);
+  const label = (b: (typeof segs)[number]) => BUCKETS.find((x) => x.id === b)!.short.toLowerCase();
+  const locked = t.locked.length + t.more;
+  return (
+    <section className="side-card insp-preview insp-free" aria-labelledby="insp-strip-h">
+      <p className="insp-preview-top">
+        <span className="insp-pro">Pro</span> Deep Inspection
+      </p>
+      <h2 id="insp-strip-h" className={`insp-preview-call v-${t.tone}`}>
+        <SevIcon kind={t.tone === "no" ? "blocker" : t.tone === "maybe" ? "important" : "pass"} size={18} />
+        {t.title}
+      </h2>
+      <div className="insp-strip-bar">
+        <div className="insp-sevbar small" role="img" aria-label={segs.map((b) => `${t.counts[b]} ${label(b)}`).join(", ")}>
+          {segs.map((b) => (
+            <span key={b} className={`sb-seg b-${b}`} style={{ flexGrow: t.counts[b] }} />
+          ))}
+        </div>
+        <span className="insp-preview-counts">{segs.map((b) => `${t.counts[b]} ${label(b)}`).join(" · ")}</span>
+      </div>
+      {t.first && (
+        <ul className="insp-strip-list">
+          <li>
+            <SevIcon kind={t.first.bucket} />
+            <span>
+              <b>{t.first.title}</b> {t.first.text}
+            </span>
+          </li>
+          {t.locked.map((b, i) => (
+            <li key={i} className="insp-strip-locked" aria-hidden="true">
+              <SevIcon kind={b} />
+              <i style={{ width: i ? "48%" : "66%" }} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="insp-strip-foot">
+        <Link className="btn insp-preview-go" href={`/${repo}/inspection`}>
+          {locked > 0 ? `See the other ${locked} finding${locked === 1 ? "" : "s"} →` : `See all ${t.checks} checks →`}
+        </Link>
+        <span className="note">
+          {t.checks} checks · {timeAgo(t.scannedAt)}
+          {t.commit && <> · commit {t.commit.slice(0, 7)}</>}
+        </span>
+      </div>
+    </section>
+  );
 }
 
 // The same card, greyed out, for anyone without a report to show: a sketch of what the preview holds (no real
