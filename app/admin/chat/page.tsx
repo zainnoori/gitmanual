@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "Chat (admin)", robots: { index: fals
 // Chat use, spend and who reached the daily limit. Only for ADMIN_GITHUB_LOGINS (checked by the API).
 export default function AdminChat() {
   return (
-    <DocPage eyebrow="Admin" title="Chat">
+    <DocPage eyebrow="Admin" title="Chat" wide>
       <ChatAdmin />
     </DocPage>
   );

@@ -880,6 +880,7 @@ code.flow-label { font: 600 var(--fs-meta)/1.4 var(--mono); background: none; bo
 .doc-head { max-width: 680px; margin-bottom: 36px; }
 .doc-updated { margin: 14px 0 0; font: 500 var(--fs-meta) var(--mono); color: var(--pencil); }
 .doc-body { max-width: 680px; font-size: var(--fs-body); line-height: 1.65; overflow-wrap: anywhere; }
+.doc-wide .doc-body { max-width: none; } /* admin tables use the whole page width */
 .doc-body h2 { font: 800 var(--fs-h3) var(--display); letter-spacing: -0.015em; margin: 36px 0 10px; }
 .doc-body p, .doc-body ul { margin: 0 0 14px; }
 .doc-body ul { padding-left: 1.2em; }

@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: "API keys (admin)", robots: { index: 
 // Every API key, its owner and use, with a switch to turn one off. Only for ADMIN_GITHUB_LOGINS (checked by the API).
 export default function AdminKeys() {
   return (
-    <DocPage eyebrow="Admin" title="API keys">
+    <DocPage eyebrow="Admin" title="API keys" wide>
       <KeysAdmin />
     </DocPage>
   );
