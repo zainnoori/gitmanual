@@ -35,6 +35,7 @@ const ICONS = {
   lock: "M5 11h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2zM7 11V7a5 5 0 0 1 10 0v4",
   noads: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM4.93 4.93l14.14 14.14",
   gift: "M20 12v10H4V12M2 7h20v5H2zM12 22V7M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z",
+  inspect: "M11 3a8 8 0 1 0 0 16 8 8 0 0 0 0-16zM21 21l-4.35-4.35M8 11l2 2 4-4",
   folder: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z",
 } as const;
 
@@ -144,6 +145,9 @@ export function Plans({ prices: saved, free, contact }: { prices: Prices; free: 
             <Feature icon="sparkle" title="1 AI-written guide a day">
               A full walkthrough for your computer, once you sign in with GitHub
             </Feature>
+            <Feature icon="inspect" title="Deep Inspection preview">
+              The verdict, the counts and the first finding on popular manuals
+            </Feature>
             <Feature icon="plug" title="Browser extension and API">
               Open a manual from any GitHub page, or use gitmanual from your own code
             </Feature>
@@ -201,6 +205,9 @@ export function Plans({ prices: saved, free, contact }: { prices: Prices; free: 
           {status && !status.pro && <p className="pro-foot">Cancel any time. Tax added at checkout where it applies.</p>}
           <p className="pro-feats-lead">Everything in Free, plus:</p>
           <ul className="pro-feats pro-feats-pro">
+            <Feature icon="inspect" title="Deep Inspection of any repo">
+              The full report: blockers, setup gaps, security, licence and upkeep, checked against the repo&apos;s files
+            </Feature>
             <Feature icon="infinity" title="Ask the AI helper as much as you need">
               No daily limit, on the site and in the browser extension
             </Feature>

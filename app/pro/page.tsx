@@ -9,7 +9,7 @@ import { Plans } from "./plans";
 
 export const metadata: Metadata = {
   title: "GitManual Pro",
-  description: "Unlimited questions to GitManual AI Agent about any public GitHub repo, on the site and in the browser extension.",
+  description: "Deep Inspection of any public GitHub repo, unlimited questions to GitManual AI Agent, PDF manuals and no ads.",
   alternates: { canonical: "/pro" },
 };
 
@@ -28,8 +28,8 @@ export default async function ProPage() {
         <p className="eyebrow">GitManual Pro</p>
         <h1 className="display-md">Ask as much as the setup needs.</h1>
         <p className="lead">
-          Free lets you ask the AI helper {POOLS.user.answersPerDay} questions a day. Pro removes that limit, lets you download any
-          manual as a PDF, and hides the ads.
+          Pro opens the full Deep Inspection of any repo, removes the limit of {POOLS.user.answersPerDay} AI questions a day, lets
+          you download any manual as a PDF, and hides the ads.
         </p>
       </header>
 
