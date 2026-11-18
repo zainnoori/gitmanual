@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { markAdFree } from "@/lib/adfree";
+import { parseRepoUrl } from "@/lib/github";
+import { hasPurchase } from "@/lib/db";
 import { proFor, syncCheckout } from "@/lib/pro";
 import { planPrices, PRO_ENABLED } from "@/lib/stripe";
 import { SESSION_COOKIE } from "@/lib/session";
 import { viewer } from "@/lib/viewer";
 
 // For /pro: who's signed in, whether they have Pro and until when, and the prices.
+// ?repo=owner/name adds whether they bought that repo's report (the PDF dialog on a manual).
 // ?session_id= is the checkout Stripe just sent them back from; it's read once so Pro shows straight away.
 export async function GET(req: Request) {
   const headers = { "Cache-Control": "private, no-store" };
@@ -13,12 +16,18 @@ export async function GET(req: Request) {
   const { user, settle } = await viewer();
   const sessionId = new URL(req.url).searchParams.get("session_id");
   if (user && sessionId && /^cs_[\w]+$/.test(sessionId)) await syncCheckout(sessionId, user.id).catch((e) => console.error("gitmanual pro:", e));
-  const [{ pro, subscription }, prices] = await Promise.all([proFor(user?.id), planPrices()]);
+  const ref = parseRepoUrl(new URL(req.url).searchParams.get("repo") ?? "");
+  const [{ pro, subscription }, prices, bought] = await Promise.all([
+    proFor(user?.id),
+    planPrices(),
+    user && ref && !ref.ref ? hasPurchase(user.id, `${ref.owner}/${ref.repo}`).catch(() => false) : false,
+  ]);
   const res = NextResponse.json(
     {
       enabled: true,
       login: user?.login ?? null,
       pro,
+      bought: !pro && bought,
       subscription: subscription && {
         status: subscription.status,
         plan: subscription.plan,

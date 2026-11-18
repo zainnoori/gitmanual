@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import { compactCount } from "@/lib/format";
 import { parseRepoUrl } from "@/lib/github";
 import type { Arch } from "@/lib/install";
@@ -292,62 +292,6 @@ function NavSearch() {
       />
       <kbd aria-hidden="true">/</kbd>
     </form>
-  );
-}
-
-// "Contact": our own dialog around the site owner's ShareText form (CONTACT_FORM_URL).
-// The form stays in its iframe, so what people type never touches this page. Nothing loads from
-// sharetext.net until the dialog opens; their small script then sizes the frame to the form.
-export const OPEN_CONTACT = "gitmanual:contact";
-
-export function ContactButton({ form }: { form: string }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [opened, setOpened] = useState(false);
-
-  const open = useCallback(() => {
-    setOpened(true);
-    dialog.current?.showModal();
-    if (!document.querySelector("script[data-sharetext-resize]")) {
-      const script = document.createElement("script");
-      script.src = new URL("/forms-embed.js", form).href;
-      script.async = true;
-      script.dataset.sharetextResize = "";
-      document.head.append(script);
-    }
-  }, [form]);
-
-  // Other parts of the page (the "Advertise here" link in the ad box) open this same form.
-  useEffect(() => {
-    window.addEventListener(OPEN_CONTACT, open);
-    return () => window.removeEventListener(OPEN_CONTACT, open);
-  }, [open]);
-
-  return (
-    <>
-      <button type="button" className="btn btn-sm contact-open" onClick={open} aria-haspopup="dialog">
-        Contact
-      </button>
-      <dialog
-        ref={dialog}
-        className="contact"
-        aria-labelledby="contact-h"
-        // A click on the backdrop (the dialog itself, outside its box) closes it.
-        onClick={(e) => e.target === e.currentTarget && dialog.current?.close()}
-      >
-        <div className="contact-box">
-          <div className="contact-head">
-            <div>
-              <h2 id="contact-h">Contact</h2>
-              <p>Questions, feedback or advertising.</p>
-            </div>
-            <button type="button" className="contact-close" onClick={() => dialog.current?.close()} aria-label="Close">
-              ×
-            </button>
-          </div>
-          {opened && <iframe src={form} title="Contact form" className="contact-frame" />}
-        </div>
-      </dialog>
-    </>
   );
 }
 

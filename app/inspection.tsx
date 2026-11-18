@@ -2,20 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ARCH_NOTE, BUCKETS, GRADE_LABEL, KIND_LABEL, LEVEL_LABEL, ORDER, SECTION_LABEL, STATUS_LABEL, bucketOf, counted, coverageLines, fixFirst, limited, rankOf, setupFindings, triage, verdict, vulnNote, vulnPackages, vulnRows, type Bucket } from "@/lib/inspection/labels";
+import { ARCH_NOTE, BUCKETS, GRADE_LABEL, KIND_LABEL, LEVEL_LABEL, ORDER, SECTION_LABEL, STATUS_LABEL, bucketOf, counted, coverageLines, fixFirst, limited, rankOf, setupFindings, triage, verdict, vulnNote, vulnPackages, vulnRows, type Bucket, type Teaser } from "@/lib/inspection/labels";
 import { toMarkdown } from "@/lib/inspection/markdown";
 import type { Answer, Audience, Finding, GradeId, Inspection, Level, SectionId, StepPhase } from "@/lib/inspection/types";
 import { ArchitectureDiagram, ContinuityBars, ReleaseTimeline, RepliesChart, StarHistory } from "./inspection-charts";
 import { SevIcon } from "./sev-icon";
-import { BuyRepo } from "./buy-repo";
+import { PaymentPending, REPO_PRICE, UnlockChoice } from "./buy-repo";
+import { FoundLine, INSPECTION_CHECKS } from "./inspect-dialog";
 import { GitHubMark } from "./github-mark";
 import { HEADLINE } from "@/lib/inspection/types";
-import { proUrl } from "@/lib/site";
 
 // Deep Inspection (Pro): the report page. Pro members see the saved report straight away (and a fresh one is built
 // when there's none, or it's a few days old); everyone else sees what it covers and the way to Pro.
 
-type Status = { signedIn: boolean; login?: string | null; pro: boolean; bought?: boolean; left?: number | null; inspection: Inspection | null; fresh?: boolean };
+type Status = { signedIn: boolean; login?: string | null; pro: boolean; bought?: boolean; left?: number | null; inspection: Inspection | null; fresh?: boolean; teaser?: Teaser | null };
 
 const AUDIENCE_KEY = "gitmanual-inspection-audience";
 
@@ -77,11 +77,11 @@ export function InspectionView({ repo }: { repo: string }) {
   const [owner, name] = repo.split("/");
   const has = Boolean(status?.pro || status?.bought);
   // Back from buying this repo's report (app/api/pro/report/done adds ?bought=1).
-  const [justBought, setJustBought] = useState(false);
+  const [justBought, setJustBought] = useState<string | null>(null);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     if (!q.has("bought")) return;
-    setJustBought(true);
+    setJustBought(q.get("bought"));
     q.delete("bought");
     window.history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}${window.location.hash}`);
   }, []);
@@ -103,6 +103,7 @@ export function InspectionView({ repo }: { repo: string }) {
         </p>
       </header>
 
+      {justBought && status && !has && <PaymentPending />}
       {justBought && status?.bought && (
         <p className="pro-thanks" role="status">
           Thank you! This report is yours, with the PDF manuals for {name}. Find them any time in{" "}
@@ -110,7 +111,7 @@ export function InspectionView({ repo }: { repo: string }) {
         </p>
       )}
       {!status && !error && <Skeleton />}
-      {status && !has && <Locked repo={repo} signedIn={status.signedIn} login={status.login ?? null} />}
+      {status && !has && <Locked repo={repo} signedIn={status.signedIn} login={status.login ?? null} teaser={status.teaser ?? null} />}
       {error && !busy && (
         <div className="insp-error" role="alert">
           <p>{error}</p>
@@ -176,9 +177,8 @@ function Skeleton() {
 
 // Signed out: sign in with GitHub first (it comes straight back here), the same as downloading a manual. Signed in
 // without Pro: the offer, addressed to them.
-function Locked({ repo, signedIn, login }: { repo: string; signedIn: boolean; login: string | null }) {
+function Locked({ repo, signedIn, login, teaser }: { repo: string; signedIn: boolean; login: string | null; teaser: Teaser | null }) {
   const signIn = `/api/github/connect?signin=1&back=${encodeURIComponent(`/${repo}/inspection`)}`;
-  const go = signedIn ? proUrl(`/${repo}/inspection`) : signIn;
   return (
     <section className="insp-locked" aria-labelledby="insp-locked-h">
       <div className="insp-locked-sketch" aria-hidden="true">
@@ -200,35 +200,25 @@ function Locked({ repo, signedIn, login }: { repo: string; signedIn: boolean; lo
         </ul>
       </div>
       <div className="insp-locked-card">
-        {signedIn && login && <p className="insp-locked-hi">Hi @{login}, Deep Inspection comes with GitManual Pro, or for this repo alone.</p>}
+        {signedIn && login && <p className="insp-locked-hi">Hi @{login}</p>}
         <h2 id="insp-locked-h">Find the gaps before you install it</h2>
-        <p>
-          Deep Inspection reads the whole repo and checks its setup steps against its files: missing scripts and files, version conflicts, settings the
-          code needs, services and accounts, exposed keys, tests and CI. Then it reports on 12 topics, each with links to the lines behind it:
-        </p>
-        <a className="btn btn-go pro-btn" href={go}>
-          {!signedIn && <GitHubMark />}
-          {signedIn ? "Get Pro to inspect this repo" : "Sign in with GitHub to continue"}
-        </a>
-        {signedIn && (
-          <div className="insp-locked-once">
-            <BuyRepo repo={repo} back={`/${repo}/inspection`} signedIn className="btn pro-btn" />
-            <small>One time: this report and the PDF manuals for this repo, kept in your profile. Tax added where it applies.</small>
-          </div>
-        )}
-        <ul>
-          {HEADLINE.map((h) => (
-            <li key={h.id}>{h.q}</li>
+        <p>Deep Inspection reads the whole repo and checks its setup against its own files. Each finding links to the lines behind it.</p>
+        {teaser && <FoundLine t={teaser} />}
+        <ul className="inspect-checks">
+          {INSPECTION_CHECKS.map((c) => (
+            <li key={c}>{c}</li>
           ))}
         </ul>
-        <a className="insp-locked-more" href={go}>
-          {signedIn ? "Get Pro →" : "Sign in to continue →"}
-        </a>
-        <small>
-          {signedIn
-            ? "Pro covers every repo, with unlimited AI answers, PDF manuals and no ads."
-            : "Free to sign in. Deep Inspection is part of GitManual Pro; members go straight to the report."}
-        </small>
+        {signedIn ? (
+          <UnlockChoice repo={repo} back={`/${repo}/inspection`} />
+        ) : (
+          <>
+            <a className="btn btn-go pro-btn" href={signIn}>
+              <GitHubMark /> Sign in with GitHub to continue
+            </a>
+            <small>Free to sign in. Then unlock this repo&apos;s Deep Inspection and PDF manuals for {REPO_PRICE} once, or every repo&apos;s with Pro.</small>
+          </>
+        )}
       </div>
     </section>
   );
@@ -1137,5 +1127,4 @@ function Scorecard({ report }: { report: Inspection }) {
     </section>
   );
 }
-
 

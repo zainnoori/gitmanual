@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { sitePath } from "@/lib/site";
 import { BuyRepo, REPO_PRICE } from "../buy-repo";
-import { OPEN_CONTACT } from "../ui";
+import { openContact } from "../report-problem";
 
 // The plan cards on /pro. Prices come from Stripe (rendered on the server); who's signed in and whether they have
 // Pro come from /api/pro, which also records a checkout the visitor has just come back from.
@@ -311,7 +311,7 @@ function TeamCard({ contact }: { contact: boolean }) {
           <>
             {" "}
             Need it now?{" "}
-            <button type="button" className="link" onClick={() => window.dispatchEvent(new Event(OPEN_CONTACT))}>
+            <button type="button" className="link" onClick={() => openContact("question")}>
               Contact us
             </button>
           </>

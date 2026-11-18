@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Analytics } from "@vercel/analytics/next";
 import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
 import { AD_FREE_COOKIE } from "@/lib/site";
-import { ContactButton, LaunchBanner, Logo, NavLinks } from "./ui";
+import { ReportProblem } from "./report-problem";
+import { LaunchBanner, Logo, NavLinks } from "./ui";
 import "./globals.css";
 
 const display = Bricolage_Grotesque({ subsets: ["latin"], variable: "--font-display" });
@@ -32,10 +33,8 @@ const REPO_URL = process.env.NEXT_PUBLIC_REPO_URL || null;
 // Optional: the browser extension's store page, linked from the footer and the home page.
 const EXTENSION_URL = process.env.NEXT_CHROME_EXTENSION_URL || null;
 const PRO = process.env.PRO_ENABLED === "on" && Boolean(process.env.STRIPE_SECRET_KEY);
-// Optional: a ShareText form for "Contact" in the footer (only https links are used).
 // Optional: the Product Hunt launch page, shown in a strip above the menu while it's set (only producthunt.com links).
 const LAUNCH_URL = /^https:\/\/(www\.)?producthunt\.com\/[^\s"]+$/.test(process.env.PRODUCT_HUNT_URL ?? "") ? process.env.PRODUCT_HUNT_URL! : null;
-const CONTACT_FORM = /^https:\/\/[^\s"]+$/.test(process.env.CONTACT_FORM_URL ?? "") ? process.env.CONTACT_FORM_URL! : null;
 
 async function repoStars(): Promise<number | null> {
   const m = REPO_URL?.match(/github\.com\/([\w.-]+\/[\w.-]+)/);
@@ -84,7 +83,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <p>
                 Setup manuals for open source. In any GitHub link, swap <s>hub</s> for <b>manual</b>.
               </p>
-              {CONTACT_FORM && <ContactButton form={CONTACT_FORM} />}
+              <div className="footer-help">
+                <ReportProblem mode="contact" className="btn btn-sm footer-report">
+                  Contact
+                </ReportProblem>
+                <ReportProblem mode="site" className="btn btn-sm footer-report">
+                  Report a problem
+                </ReportProblem>
+              </div>
             </div>
             <nav className="footer-col" aria-label="Use gitmanual">
               <h2>Use it</h2>

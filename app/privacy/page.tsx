@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CONTACT_FORM, REPO_URL, SITE_HOST } from "@/lib/site";
+import { REPO_URL, SITE_HOST } from "@/lib/site";
 import { DocPage } from "../doc";
 
 const AI_GUIDES = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -20,7 +20,7 @@ export default function Privacy() {
       eyebrow="Privacy"
       title="Privacy policy"
       lead="Short version: no passwords or profiles, no tracking cookies from gitmanual, and nothing that identifies you is stored unless you sign in with GitHub. Some pages show one ad from Carbon."
-      updated="16 November 2026"
+      updated="18 November 2026"
     >
       <h2>What gitmanual stores</h2>
       <ul>
@@ -31,6 +31,12 @@ export default function Privacy() {
         <li>
           <strong>Counts.</strong> How often each repo&apos;s manual is opened and downloaded, and &ldquo;Did you get it running?&rdquo;
           answers: the repo, the day, the system (macOS, Windows or Linux) and yes or no. Nothing about who answered or downloaded.
+        </li>
+        <li>
+          <strong>Messages and problem reports.</strong> When you use &ldquo;Contact&rdquo;, &ldquo;Report a problem&rdquo; or &ldquo;Something wrong with this manual?&rdquo;:
+          what you write, the error you paste, the page you sent it from (and the repo, system and step for a manual), your GitHub username
+          if you&apos;re signed in, and your name and email if you give them so we can reply.
+          They&apos;re read only by us and never published. Ask through the contact form to have yours deleted.
         </li>
         <li>
           <strong>Rate-limit counters.</strong> To stop abuse, the number of new repos, AI guides and votes requested in a short window is
@@ -129,12 +135,6 @@ export default function Privacy() {
           <strong>Facebook</strong>: on the Finds page, pressing play on a Reel loads Facebook&apos;s video player, which follows
           Facebook&apos;s own privacy policy. Until you press play, nothing on the page comes from Facebook.
         </li>
-        {CONTACT_FORM && (
-          <li>
-            <strong>ShareText</strong>: the contact form is provided by sharetext.net. It loads only on the contact page or when you open the Contact dialog. What you write is sent
-            to ShareText and to us, under ShareText&apos;s privacy policy.
-          </li>
-        )}
         <li>
           <strong>AI chats</strong>: the &ldquo;Ask Claude&rdquo; and &ldquo;Ask ChatGPT&rdquo; buttons open claude.ai or chatgpt.com in a
           new tab with a prompt about the repo already filled in. gitmanual sends nothing itself; what happens there is between you and that

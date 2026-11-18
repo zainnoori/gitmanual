@@ -114,6 +114,22 @@ const SCHEMA = `
     paid_at INTEGER NOT NULL        -- ms
   );
   CREATE INDEX IF NOT EXISTS purchases_owner ON purchases (github_id, repo);
+  CREATE TABLE IF NOT EXISTS problems (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at INTEGER NOT NULL,    -- ms
+    repo TEXT NOT NULL,             -- owner/Name the manual was for, as shown; '' for the site (the footer's "Report a problem")
+    os TEXT NOT NULL,               -- '' for the site
+    kind TEXT NOT NULL,             -- lib/problems.ts PROBLEM_KINDS, SITE_KINDS
+    step INTEGER,                   -- 1-based step number, when they picked one
+    step_title TEXT,
+    message TEXT NOT NULL,
+    error TEXT,                     -- what the terminal printed, pasted
+    email TEXT,                     -- only when they want a reply
+    github_login TEXT,              -- when signed in
+    version INTEGER NOT NULL,       -- the manual's analysis version (lib/pipeline.ts VERSION)
+    status TEXT NOT NULL DEFAULT 'open' -- open | fixed | closed
+  );
+  CREATE INDEX IF NOT EXISTS problems_status ON problems (status, created_at);
   CREATE TABLE IF NOT EXISTS interest (
     feature TEXT NOT NULL,          -- a feature not built yet, e.g. "pdf", whose button only says "coming soon"
     day TEXT NOT NULL,              -- UTC date, YYYY-MM-DD
@@ -164,7 +180,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 2; // 2: purchases
+const SCHEMA_VERSION = 5; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form)
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -202,6 +218,9 @@ function db(): Promise<Client | null> {
         "ALTER TABLE repos ADD COLUMN rising_at INTEGER", // when the daily trending job last found it rising
         "ALTER TABLE repos ADD COLUMN facets TEXT", // searchable facts for lists and suggestions (lib/facets.ts)
         "ALTER TABLE chat_spend ADD COLUMN repo TEXT", // lower-case owner/repo the answer was about (public repos only)
+        "ALTER TABLE problems ADD COLUMN page TEXT", // the page a report was sent from
+        "ALTER TABLE problems ADD COLUMN mode TEXT NOT NULL DEFAULT 'manual'", // manual | site | contact (lib/problems.ts)
+        "ALTER TABLE problems ADD COLUMN name TEXT", // contact: the name they gave
       ])
         await client.execute(sql).catch(() => {});
       // "Got it running" counts kept on the repo, so lists and the shelf don't join and group the votes table.
@@ -1160,4 +1179,66 @@ export function saveStats(days = 30, now = Date.now()): Promise<SaveStats> {
       top: top.rows.map((r) => ({ repo: String(r.key), saves: Number(r.n) })),
     };
   });
+}
+
+// "Something wrong?" reports from a manual (app/report-problem.tsx, app/api/problems), read on /admin/problems.
+export type ProblemStatus = "open" | "fixed" | "closed";
+export type Problem = {
+  id: number;
+  createdAt: number;
+  repo: string;
+  os: string;
+  kind: string;
+  step: number | null;
+  stepTitle: string | null;
+  message: string;
+  error: string | null;
+  email: string | null;
+  githubLogin: string | null;
+  page: string | null;
+  mode: string;
+  name: string | null;
+  version: number;
+  status: ProblemStatus;
+};
+
+export async function saveProblem(p: Omit<Problem, "id" | "createdAt" | "status">): Promise<void> {
+  await strictly((c) =>
+    c.execute({
+      sql: `INSERT INTO problems (created_at, mode, repo, os, kind, step, step_title, name, message, error, email, github_login, page, version)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [Date.now(), p.mode, p.repo, p.os, p.kind, p.step, p.stepTitle, p.name, p.message, p.error, p.email, p.githubLogin, p.page, p.version],
+    }),
+  );
+}
+
+export async function listProblems(status: ProblemStatus | "all", max = 300): Promise<Problem[]> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({
+      sql: `SELECT * FROM problems ${status === "all" ? "" : "WHERE status = ?"} ORDER BY created_at DESC LIMIT ?`,
+      args: status === "all" ? [max] : [status, max],
+    });
+    return rows.map((r) => ({
+      id: Number(r.id),
+      createdAt: Number(r.created_at),
+      repo: String(r.repo),
+      os: String(r.os),
+      kind: String(r.kind),
+      step: r.step == null ? null : Number(r.step),
+      stepTitle: r.step_title == null ? null : String(r.step_title),
+      message: String(r.message),
+      error: r.error == null ? null : String(r.error),
+      email: r.email == null ? null : String(r.email),
+      githubLogin: r.github_login == null ? null : String(r.github_login),
+      page: r.page == null ? null : String(r.page),
+      mode: String(r.mode ?? "manual"),
+      name: r.name == null ? null : String(r.name),
+      version: Number(r.version),
+      status: String(r.status) as ProblemStatus,
+    }));
+  });
+}
+
+export async function setProblemStatus(id: number, status: ProblemStatus): Promise<void> {
+  await strictly((c) => c.execute({ sql: "UPDATE problems SET status = ? WHERE id = ?", args: [status, id] }));
 }

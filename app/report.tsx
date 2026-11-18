@@ -21,7 +21,9 @@ import { proUrl, SIGNED_IN_COOKIE } from "@/lib/site";
 import { disconnect, fetchPrivate, PrivateAccess } from "./private";
 import { CarbonAd } from "./carbon";
 import { ArchitectureDiagram } from "./inspection-charts";
-import { REPO_PRICE } from "./buy-repo";
+import { PaymentPending, REPO_PRICE, UnlockChoice } from "./buy-repo";
+import { InspectDialog } from "./inspect-dialog";
+import { ReportProblem } from "./report-problem";
 import { SevIcon } from "./sev-icon";
 import { GitHubMark } from "./github-mark";
 import type { Inspection } from "@/lib/inspection/types";
@@ -57,6 +59,7 @@ type Result = {
   cached: boolean;
   stale?: boolean;
   votes: Votes;
+  version?: number; // the analysis version (lib/pipeline.ts)
 };
 
 type Votes = { worked: number; stuck: number; byOs: Record<string, { worked: number; stuck: number }> };
@@ -779,7 +782,7 @@ function Report({
             </>
           )}
 
-          {!priv && <DidItWork repo={meta.fullName} os={os} votes={result.votes} onVotes={onVotes} />}
+          {!priv && <DidItWork repo={meta.fullName} os={os} votes={result.votes} onVotes={onVotes} steps={steps.map((s) => s.title)} version={result.version ?? 0} />}
 
           {chat && !priv && <Chat repo={meta.fullName} os={os} />}
 
@@ -1263,7 +1266,7 @@ function GuideButton({ status, loading, written, onGuide, page }: { status: Guid
 // everyone else. While Pro is off on the site, the PDF says "coming soon". Every PDF press
 // by someone without Pro is counted (app/api/interest) for the demand numbers on /admin/chat. #pdf in the URL opens
 // it, which is how it comes back open after signing in.
-type ProStatus = { enabled: boolean; login?: string | null; pro?: boolean };
+type ProStatus = { enabled: boolean; login?: string | null; pro?: boolean; bought?: boolean; prices?: { month: number; year: number; currency: string } | null };
 // The PDF design is a private package (next.config.mjs); copies of gitmanual without it offer Markdown only.
 const PDF_DESIGN = process.env.NEXT_PUBLIC_PDF_DESIGN === "on";
 const SAVED_SYSTEM = "gitmanual-pdf-os";
@@ -1284,11 +1287,12 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
   const [changing, setChanging] = useState(false);
   const [pro, setPro] = useState<ProStatus | null>(null);
   const [soon, setSoon] = useState(false);
+  const [pending, setPending] = useState(false); // back from paying, not confirmed yet (?bought=pending)
 
   const open = () => {
     if (dialog.current && !dialog.current.open) dialog.current.showModal();
     if (!pro)
-      fetch("/api/pro", { cache: "no-store" })
+      fetch(`/api/pro?repo=${encodeURIComponent(repo)}`, { cache: "no-store" })
         .then((r) => r.json())
         .then((j: ProStatus) => setPro(j))
         .catch(() => setPro({ enabled: false }));
@@ -1306,8 +1310,14 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
     } else setSystem(os);
   }, [os]);
 
-  // Back from signing in (the sign-in link returns to #pdf): open again where they left off.
+  // Back from signing in or paying (both return to #pdf): open again where they left off.
   useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.has("bought")) {
+      setPending(q.get("bought") === "pending");
+      q.delete("bought");
+      history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}${window.location.hash}`);
+    }
     if (window.location.hash === "#pdf") open();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on arrival
   }, []);
@@ -1330,6 +1340,8 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
   const countPdf = () =>
     fetch("/api/interest", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feature: "pdf", repo }), keepalive: true }).catch(() => {});
   const name = repo.split("/")[1];
+  const has = Boolean(pro?.pro || pro?.bought); // Pro, or this repo bought once
+  const choose = Boolean(pro?.enabled && !has && pro.login && PDF_DESIGN); // signed in, neither: the two ways in
 
   return (
     <>
@@ -1450,31 +1462,37 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
                 >
                   <DownloadIcon /> {soon ? "Coming soon. Thank you!" : "Download PDF"}
                 </button>
-              ) : pro.pro && !PDF_DESIGN ? null : pro.pro ? (
+              ) : has && !PDF_DESIGN ? null : has ? (
                 <a className="btn btn-go" href={url("pdf")}>
                   <DownloadIcon /> Download PDF
                 </a>
               ) : pro.login ? (
-                <a className="btn btn-go" href={proUrl(`${back}`)} onClick={() => countPdf()}>
-                  Get Pro to download <span className="dl-pro">Pro</span>
-                </a>
+                PDF_DESIGN ? null : (
+                  <a className="btn btn-go" href={proUrl(`${back}`)} onClick={() => countPdf()}>
+                    Get Pro to download <span className="dl-pro">Pro</span>
+                  </a>
+                )
               ) : (
                 <a className="btn btn-go" href={`/api/github/connect?signin=1&back=${encodeURIComponent(back)}`} onClick={() => countPdf()}>
                   <GitHubMark /> Sign in to download
                 </a>
               )}
-              {pro?.enabled && pro.pro && (
+              {pro?.enabled && has && (
                 <a className="btn" href={url("md")} download>
                   <DownloadIcon /> Markdown
                 </a>
               )}
             </div>
+            {choose && pending && <PaymentPending />}
+            {choose && <UnlockChoice repo={repo} back={back} prices={pro?.prices ?? null} onChoose={countPdf} />}
             <p className="pdf-note">
-              {pro?.enabled && !pro.pro
+              {pro?.enabled && !has
                 ? pro.login
-                  ? `Signed in as @${pro.login}. Manuals as PDF or Markdown come with GitManual Pro.`
-                  : "Manuals as PDF or Markdown come with GitManual Pro. Sign in with GitHub, then get Pro."
-                : pro?.pro
+                  ? choose
+                    ? `Signed in as @${pro.login}.`
+                    : `Signed in as @${pro.login}. Unlock ${name}'s PDF manuals and Deep Inspection for ${REPO_PRICE} once, or every repo's with Pro.`
+                  : `Sign in with GitHub, then unlock ${name}'s PDF manuals and Deep Inspection for ${REPO_PRICE} once, or every repo's with Pro.`
+                : has
                   ? "PDF to print or share; Markdown to keep with your notes or project. Made from the repo's own files, not tested by gitmanual."
                   : "Made from the repo's own files. Not tested by gitmanual: read every command before you run it."}
             </p>
@@ -1500,7 +1518,7 @@ function useSavedInspection(repo: string): Saved | null {
         repo,
         fetch(`/api/inspection?repo=${encodeURIComponent(repo)}`, { cache: "no-store" })
           .then((r) => (r.ok ? r.json() : null))
-          .then((j) => (j ? { signedIn: Boolean(j.signedIn), pro: Boolean(j.pro), inspection: j.inspection ?? null, teaser: j.teaser ?? null } : null))
+          .then((j) => (j ? { signedIn: Boolean(j.signedIn), pro: Boolean(j.pro), bought: Boolean(j.bought), inspection: j.inspection ?? null, teaser: j.teaser ?? null } : null))
           .catch(() => null),
       );
     savedCache.get(repo)!.then((v) => live && setState(v));
@@ -1517,14 +1535,14 @@ function InspectionCard({ repo }: { repo: string }) {
   const state = useSavedInspection(repo);
   const has = Boolean(state?.pro || state?.bought); // Pro, or this repo's report bought once
   const r = has ? state!.inspection : null;
-  if (!has && state?.teaser) return <InspectionFree repo={repo} t={state.teaser} />;
-  if (!r) return <InspectionTeaser repo={repo} pro={has} />;
+  if (!has && state?.teaser) return <InspectionFree repo={repo} t={state.teaser} signedIn={state.signedIn} />;
+  if (!r) return <InspectionTeaser repo={repo} pro={has} signedIn={Boolean(state?.signedIn)} />;
   return <InspectionPreview repo={repo} r={r} />;
 }
 
 // The free preview, for people without Pro on a repo that has a saved report: the real verdict and counts, the first
 // thing to look at in full, the next ones locked (only their kind is known here).
-function InspectionFree({ repo, t }: { repo: string; t: Teaser }) {
+function InspectionFree({ repo, t, signedIn }: { repo: string; t: Teaser; signedIn: boolean }) {
   const segs = (["blocker", "important", "improvement", "pass"] as const).filter((b) => t.counts[b] > 0);
   const label = (b: (typeof segs)[number]) => BUCKETS.find((x) => x.id === b)!.short.toLowerCase();
   const locked = t.locked.length + t.more;
@@ -1562,9 +1580,9 @@ function InspectionFree({ repo, t }: { repo: string; t: Teaser }) {
         </ul>
       )}
       <div className="insp-strip-foot">
-        <Link className="btn insp-preview-go" href={`/${repo}/inspection`}>
+        <InspectDialog repo={repo} signedIn={signedIn} teaser={t} className="btn insp-preview-go">
           {locked > 0 ? `See the other ${locked} finding${locked === 1 ? "" : "s"} →` : `See all ${t.checks} checks →`}
-        </Link>
+        </InspectDialog>
         <span className="note">
           With Pro, or {REPO_PRICE} once for this repo · {t.checks} checks · {timeAgo(t.scannedAt)}
           {t.commit && <> · commit {t.commit.slice(0, 7)}</>}
@@ -1575,10 +1593,11 @@ function InspectionFree({ repo, t }: { repo: string; t: Teaser }) {
 }
 
 // The same card, greyed out, for anyone without a report to show: a sketch of what the preview holds (no real
-// findings, those are Pro), and the whole card leads to the inspection page.
-function InspectionTeaser({ repo, pro }: { repo: string; pro: boolean }) {
-  return (
-    <Link className="side-card insp-preview insp-teaser" href={`/${repo}/inspection`} aria-label={pro ? "Inspect this repo with Deep Inspection" : "See what Deep Inspection shows for this repo"}>
+// findings, those are Pro). Pro or bought: the whole card leads to the inspection page; otherwise its button opens
+// the Deep Inspection dialog (app/inspect-dialog.tsx).
+function InspectionTeaser({ repo, pro, signedIn }: { repo: string; pro: boolean; signedIn: boolean }) {
+  const body = (
+    <>
       <p className="insp-preview-top">
         <span className="insp-pro">Pro</span> Deep Inspection
       </p>
@@ -1595,9 +1614,23 @@ function InspectionTeaser({ repo, pro }: { repo: string; pro: boolean }) {
         <i style={{ width: "74%" }} />
       </span>
       <span className="insp-teaser-pitch">See what needs attention before you invest time in this repo.</span>
-      {!pro && <span className="insp-preview-counts">With Pro, or {REPO_PRICE} once for this repo with its PDF manuals.</span>}
-      <span className="btn insp-preview-go">{pro ? "Inspect this repo →" : "Unlock Deep Inspection →"}</span>
-    </Link>
+    </>
+  );
+  if (pro)
+    return (
+      <Link className="side-card insp-preview insp-teaser" href={`/${repo}/inspection`} aria-label="Inspect this repo with Deep Inspection">
+        {body}
+        <span className="btn insp-preview-go">Inspect this repo →</span>
+      </Link>
+    );
+  return (
+    <section className="side-card insp-preview insp-teaser">
+      {body}
+      <span className="insp-preview-counts">{REPO_PRICE} once for this repo with its PDF manuals, or with Pro.</span>
+      <InspectDialog repo={repo} signedIn={signedIn} teaser={null} className="btn insp-preview-go">
+        Unlock Deep Inspection →
+      </InspectDialog>
+    </section>
   );
 }
 
@@ -1649,7 +1682,8 @@ function ManualArchitecture({ repo }: { repo: string }) {
   if (!state) return null;
   const name = repo.split("/")[1];
   const arch = state.inspection?.architecture;
-  if (state.pro && arch && arch.parts.length >= 2)
+  const has = state.pro || Boolean(state.bought);
+  if (has && arch && arch.parts.length >= 2)
     return (
       <section className="man-arch" aria-labelledby="man-arch-h">
         <div className="man-arch-head">
@@ -1675,15 +1709,13 @@ function ManualArchitecture({ repo }: { repo: string }) {
       <div className="man-arch-lock">
         <h2 id="man-arch-h">See how {name} fits together</h2>
         <p>A diagram of its parts (app, server, database, outside services) and how they talk to each other, from its own files.</p>
-        {/* Signed out: sign in first (it comes back here), then Pro; the same order as the PDF and Deep Inspection. */}
-        {state.pro ? (
+        {/* Signed out: sign in first (it comes back here), then this repo once or Pro, as on the PDF and Deep Inspection. */}
+        {has ? (
           <Link className="btn" href={`/${repo}/inspection`}>
             Inspect this repo
           </Link>
         ) : state.signedIn ? (
-          <a className="btn" href={proUrl(`/${repo}/inspection`)}>
-            Get Pro to see it
-          </a>
+          <UnlockChoice repo={repo} back={`/${repo}/inspection`} prices={null} compact />
         ) : (
           <a className="btn" href={`/api/github/connect?signin=1&back=${encodeURIComponent(`/${repo}#man-arch-h`)}`}>
             <GitHubMark /> Sign in to see it
@@ -2062,7 +2094,9 @@ function RepoScript({ meta, guides, os }: { meta: Result["meta"]; guides: Guides
   );
 }
 
-function DidItWork({ repo, os, votes, onVotes }: { repo: string; os: OS; votes: Votes; onVotes: (v: Votes) => void }) {
+// "Did you get it running?", and a way to say what went wrong (app/report-problem.tsx): offered to everyone, and
+// first thing after "I got stuck".
+function DidItWork({ repo, os, votes, onVotes, steps, version }: { repo: string; os: OS; votes: Votes; onVotes: (v: Votes) => void; steps: string[]; version: number }) {
   const storeKey = `gitmanual-vote:${repo.toLowerCase()}`;
   const [voted, setVoted] = useState<string | null>(null);
   useEffect(() => setVoted(localStorage.getItem(storeKey)), [storeKey]);
@@ -2090,10 +2124,15 @@ function DidItWork({ repo, os, votes, onVotes }: { repo: string; os: OS; votes: 
         <h3>{voted ? (voted === "worked" ? "Nice, it's running 🎉" : "Thanks, that helps others") : "Did you get it running?"}</h3>
         <p className="note">
           {here ? `On ${OS_LABEL[os]}: ${here.worked} got it running, ${here.stuck} got stuck.` : `No reports for ${OS_LABEL[os]} yet.`}
-          {voted === "stuck" && " The guide below can help with the step that failed."}
+          {voted === "stuck" && " Tell us which step failed and we'll fix the manual, or ask the AI below."}
         </p>
+        {voted !== "stuck" && (
+          <ReportProblem mode="manual" manual={{ repo, os, steps, version }} kind="other" className="link vote-report">
+            Something wrong with this manual?
+          </ReportProblem>
+        )}
       </div>
-      {!voted && (
+      {!voted ? (
         <div className="vote-btns">
           <button className="btn btn-sm vote-yes" onClick={() => vote(true)}>
             ✓ It works
@@ -2102,6 +2141,14 @@ function DidItWork({ repo, os, votes, onVotes }: { repo: string; os: OS; votes: 
             I got stuck
           </button>
         </div>
+      ) : (
+        voted === "stuck" && (
+          <div className="vote-btns">
+            <ReportProblem mode="manual" manual={{ repo, os, steps, version }} kind="step" className="btn btn-sm">
+              Tell us what failed
+            </ReportProblem>
+          </div>
+        )
       )}
     </div>
   );

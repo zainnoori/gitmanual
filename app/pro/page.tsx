@@ -3,7 +3,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { POOLS } from "@/lib/budget";
 import { CHAT } from "@/lib/chat";
-import { CONTACT_FORM } from "@/lib/site";
 import { planPrices, PRO_ENABLED } from "@/lib/stripe";
 import { Plans } from "./plans";
 
@@ -34,7 +33,7 @@ export default async function ProPage() {
       </header>
 
       <Plans prices={prices && { month: prices.month.amount, year: prices.year.amount, currency: prices.month.currency }} free={POOLS.user.answersPerDay}
-        contact={Boolean(CONTACT_FORM)}
+        contact
       />
 
       <section className="pro-preview" aria-labelledby="pro-preview">
