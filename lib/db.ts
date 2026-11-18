@@ -1,4 +1,4 @@
-import { createClient, type Client } from "@libsql/client";
+import { createClient, type Client, type ResultSet } from "@libsql/client";
 import { FACETS_VERSION, facetsOf } from "./facets";
 
 // Turso in production (TURSO_DATABASE_URL + TURSO_AUTH_TOKEN); a local SQLite file in development.
@@ -153,6 +153,8 @@ const SCHEMA = `
 const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client | null> | null };
 
 const DB_TIMEOUT_MS = 15_000;
+// Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
+const SCHEMA_VERSION = 1;
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -175,6 +177,14 @@ function db(): Promise<Client | null> {
     };
     const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN, fetch: timed });
     try {
+      // A normal start reads one number; the setup below runs only when SCHEMA_VERSION is newer than the database's.
+      // It used to run on every new instance, and its "already there" ALTERs and CREATE INDEXes still wait in line
+      // for the write lock behind busy traffic.
+      const had = await client
+        .execute("SELECT v FROM schema_meta WHERE k = 'version'")
+        .then((r) => Number(r.rows[0]?.v ?? 0))
+        .catch(() => 0);
+      if (had >= SCHEMA_VERSION) return client;
       await client.executeMultiple(SCHEMA);
       // Columns added after a table first shipped; "duplicate column" just means it's already there.
       for (const sql of [
@@ -211,6 +221,15 @@ function db(): Promise<Client | null> {
         CREATE INDEX IF NOT EXISTS repos_popular ON repos ((views + 3 * worked));
         CREATE INDEX IF NOT EXISTS repos_rising ON repos (rising_at);
       `);
+      // Every small column the shelf, the lists, the sitemap and the suggestions read, so those queries read this
+      // index instead of the table. Each row also holds the whole analysis (data, ~70 KB on average), and facets
+      // and rising_at sit after it, so a table scan read the lot: ~6–40 s a query on 2026-11-17.
+      // On a big database, create it by hand first (turso db shell): building it can take longer than DB_TIMEOUT_MS.
+      await client.execute(
+        "CREATE INDEX IF NOT EXISTS repos_shelf ON repos (stars, key, language, rising_at, facets, full_name, description, difficulty, views, analyzed_at, worked, stuck)",
+      );
+      await client.execute("CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL)");
+      await client.execute({ sql: "INSERT OR REPLACE INTO schema_meta (k, v) VALUES ('version', ?)", args: [SCHEMA_VERSION] });
     } catch (e) {
       client.close();
       throw e;
@@ -595,7 +614,7 @@ export function browseRepos(
     const filter = where.join(" AND ");
     const page = Math.max(1, query.page ?? 1);
     const perPage = query.perPage ?? SHELF_PAGE;
-    const [rows, count, langs, rising] = await Promise.all([
+    const [rows, count, totals] = await Promise.all([
       c.execute({
         sql: `SELECT r.full_name, r.description, r.stars, r.language, r.difficulty, r.views, r.analyzed_at, r.rising_at,
                      r.worked, r.stuck
@@ -606,15 +625,9 @@ export function browseRepos(
         args: [...args, perPage, (page - 1) * perPage],
       }),
       c.execute({ sql: `SELECT COUNT(*) AS n FROM repos r WHERE ${filter}`, args }),
-      c.execute(
-        "SELECT language, COUNT(*) AS n FROM repos WHERE key NOT LIKE '%@%' AND language IS NOT NULL GROUP BY language ORDER BY n DESC, language",
-      ),
-      // The whole shelf and this week's rising repos, for the All / Rising switch.
-      c.execute({
-        sql: "SELECT COUNT(*) AS n, COALESCE(SUM(rising_at > ?), 0) AS rising FROM repos WHERE key NOT LIKE '%@%'",
-        args: [weekAgo],
-      }),
+      shelfTotals(c, weekAgo),
     ]);
+    const { langs, rising } = totals;
     return {
       repos: rows.rows.map((r) => ({
         fullName: String(r.full_name),
@@ -634,6 +647,21 @@ export function browseRepos(
       rising: Number(rising.rows[0]?.rising ?? 0),
     };
   });
+}
+
+// The language filter and the All / Rising counts are the same for every visitor: kept in memory for 5 minutes
+// instead of counting the whole shelf on each shelf view.
+let totalsCache: { at: number; value: Promise<{ langs: ResultSet; rising: ResultSet }> } | null = null;
+function shelfTotals(c: Client, weekAgo: number) {
+  if (totalsCache && Date.now() - totalsCache.at < 300e3) return totalsCache.value;
+  const value = Promise.all([
+    c.execute("SELECT language, COUNT(*) AS n FROM repos WHERE key NOT LIKE '%@%' AND language IS NOT NULL GROUP BY language ORDER BY n DESC, language"),
+    // The whole shelf and this week's rising repos, for the All / Rising switch.
+    c.execute({ sql: "SELECT COUNT(*) AS n, COALESCE(SUM(rising_at > ?), 0) AS rising FROM repos WHERE key NOT LIKE '%@%'", args: [weekAgo] }),
+  ]).then(([langs, rising]) => ({ langs, rising }));
+  totalsCache = { at: Date.now(), value };
+  value.catch(() => (totalsCache = null)); // a failed count is asked again next time
+  return value;
 }
 
 // Every repo page for the sitemap, most looked-up first (search engines read the top of big sitemaps first).
