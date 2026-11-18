@@ -8,6 +8,9 @@ const FILES: Record<string, OS> = { "mac.sh": "mac", "linux.sh": "linux", "windo
 
 // The manual's steps as one script: /owner/repo/setup/mac.sh, linux.sh or windows.ps1. Shown as text so it can be
 // read in the browser first; ?download=1 saves it as setup.sh / setup.ps1.
+// A new repo is read in seconds; a stuck one fails here instead of holding the request for 5 minutes.
+export const maxDuration = 60;
+
 export async function GET(req: Request, { params }: { params: Promise<{ owner: string; repo: string; file: string }> }) {
   const { owner, repo, file } = await params;
   const os = FILES[file];

@@ -13,6 +13,13 @@ const PER_THEME = 10;
 
 const known = (full: string) => hasRepo(full.toLowerCase());
 
+// Each repo gets at most a minute, and no new one starts after 200 s, so the run ends well inside the 300 s limit
+// even when GitHub or the database is slow (2026-11-17: requests hung until Vercel killed them).
+const PER_REPO_MS = 60_000;
+const STOP_AFTER_MS = 200_000;
+const within = <T,>(p: Promise<T>, ms: number) =>
+  Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error(`gave up after ${ms / 1000} s`)), ms))]);
+
 // Daily (vercel.json): adds manuals for repos that are rising on GitHub right now, so the shelf, the sitemap and
 // search engines get them while people are searching for them. Repos already on the shelf are left alone.
 // Then it adds the most-starred repos for one list theme that aren't on the shelf yet (not marked rising).
@@ -23,7 +30,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const started = Date.now();
-  const timeLeft = () => Date.now() - started < 240_000; // leave room before the time limit
+  const timeLeft = () => Date.now() - started < STOP_AFTER_MS;
   let candidates: string[];
   try {
     candidates = await risingRepos(40);
@@ -44,7 +51,7 @@ export async function GET(req: Request) {
       continue;
     }
     try {
-      const { key } = await loadRepo({ owner, repo });
+      const { key } = await within(loadRepo({ owner, repo }), PER_REPO_MS);
       await markRising(key);
       added.push(full);
     } catch (e) {
@@ -61,7 +68,7 @@ export async function GET(req: Request) {
         if (!timeLeft()) break;
         const [owner, repo] = full.split("/");
         try {
-          await loadRepo({ owner, repo });
+          await within(loadRepo({ owner, repo }), PER_REPO_MS);
           seeded.push(full);
         } catch (e) {
           failed.push({ repo: full, error: e instanceof Error ? e.message : String(e) });

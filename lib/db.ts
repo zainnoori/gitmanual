@@ -152,6 +152,8 @@ const SCHEMA = `
 // and a fresh connection per reload leaves stale handles on the SQLite file (they end in SQLITE_IOERR).
 const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client | null> | null };
 
+const DB_TIMEOUT_MS = 15_000;
+
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
     const url = process.env.TURSO_DATABASE_URL ?? (process.env.VERCEL ? null : `file:${process.env.GITMANUAL_DB ?? "data/gitmanual.db"}`);
@@ -164,7 +166,14 @@ function db(): Promise<Client | null> {
       const { dirname } = await import("node:path");
       mkdirSync(dirname(url.slice(5)), { recursive: true });
     }
-    const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN });
+    // A stuck request to Turso fails after DB_TIMEOUT_MS instead of holding the page until Vercel's 5-minute limit.
+    // The client runs at most 20 requests at once, so a few stuck ones would otherwise queue every page behind them
+    // (2026-11-17: /, /shelf and manuals all timed out together). Local files don't use fetch.
+    const timed = (req: Request, init?: RequestInit) => {
+      const signal = AbortSignal.timeout(DB_TIMEOUT_MS);
+      return fetch(req, { ...init, signal: req.signal ? AbortSignal.any([req.signal, signal]) : signal });
+    };
+    const client = createClient({ url, authToken: process.env.TURSO_AUTH_TOKEN, fetch: timed });
     try {
       await client.executeMultiple(SCHEMA);
       // Columns added after a table first shipped; "duplicate column" just means it's already there.
