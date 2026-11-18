@@ -1,4 +1,5 @@
 import { analyze, presentPaths, selectFiles, type Analysis } from "./detect";
+import { after } from "next/server";
 import { CACHE_MS, countView, getCached, repoKey, saveRepo } from "./db";
 import { getFiles, getHeadSha, getLatestRelease, getRepoMeta, getTree, GitHubError, type RepoMeta, type RepoRef } from "./github";
 import { findDocsLink, findDownloadPage, findSetupDocs, findSetupScripts, type Guides, type SetupDoc } from "./guides";
@@ -23,6 +24,16 @@ export type RepoData = {
 
 export type Loaded = { key: string; data: RepoData; analyzedAt: number; cached: boolean; stale?: boolean };
 
+// A view is counted after the page has been sent: it's a write to the database's primary (and to every index on
+// views), and the visitor shouldn't wait for it. Outside a request (scripts, tests) it's counted right away.
+function viewed(key: string) {
+  try {
+    after(() => countView(key));
+  } catch {
+    void countView(key);
+  }
+}
+
 // Repos analyzed in the last 12 hours come straight from the database: instant, and no GitHub calls.
 // gate runs only when the repo has to be read from GitHub (see lib/limit.ts); it throws to refuse.
 export async function loadRepo(ref: RepoRef, opts: { fresh?: boolean; view?: boolean; gate?: () => Promise<void> } = {}): Promise<Loaded> {
@@ -30,7 +41,7 @@ export async function loadRepo(ref: RepoRef, opts: { fresh?: boolean; view?: boo
   const saved = await getCached(lookup);
   const cached = saved && (saved.data as RepoData).version === VERSION ? saved : null;
   if (cached && !opts.fresh && Date.now() - cached.analyzedAt < CACHE_MS) {
-    if (opts.view) await countView(lookup);
+    if (opts.view) viewed(lookup);
     return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true };
   }
 
@@ -49,12 +60,12 @@ export async function loadRepo(ref: RepoRef, opts: { fresh?: boolean; view?: boo
     );
     // A repo new to gitmanual (main branch only; branch views aren't indexed): tell search engines about its pages.
     if (!saved && !ref.ref) announceRepo(meta.fullName);
-    if (opts.view) await countView(key);
+    if (opts.view) viewed(key);
     return { key, data, analyzedAt, cached: false };
   } catch (err) {
     // GitHub is down or rate-limited, or the visitor is over a limit: an older saved copy beats an error page.
     if (!cached) throw err;
-    if (opts.view) await countView(lookup);
+    if (opts.view) viewed(lookup);
     return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, stale: true };
   }
 }

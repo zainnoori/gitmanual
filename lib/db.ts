@@ -180,7 +180,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 5; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form)
+const SCHEMA_VERSION = 6; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -243,7 +243,6 @@ function db(): Promise<Client | null> {
         );
       // Indexes for the sort orders, so a page of results reads that page instead of the whole table.
       await client.executeMultiple(`
-        CREATE INDEX IF NOT EXISTS repos_stars ON repos (stars);
         CREATE INDEX IF NOT EXISTS repos_last_viewed ON repos (last_viewed);
         CREATE INDEX IF NOT EXISTS repos_views ON repos (views, stars);
         CREATE INDEX IF NOT EXISTS repos_worked ON repos (worked, stars);
@@ -257,6 +256,15 @@ function db(): Promise<Client | null> {
       await client.execute(
         "CREATE INDEX IF NOT EXISTS repos_shelf ON repos (stars, key, language, rising_at, facets, full_name, description, difficulty, views, analyzed_at, worked, stuck)",
       );
+      // Cleanups delete by expiry time; without these they scan the whole table.
+      await client.executeMultiple(`
+        CREATE INDEX IF NOT EXISTS hits_reset ON hits (reset_at);
+        CREATE INDEX IF NOT EXISTS chat_conversations_expires ON chat_conversations (expires_at);
+        DROP INDEX IF EXISTS repos_stars; -- repos_shelf starts with stars, so this one only cost writes
+      `);
+      // Fresh statistics for the query planner, so it picks the right index (it chose the key's index over
+      // repos_shelf on 2026-11-17). Only analyzes what needs it.
+      await client.execute("PRAGMA optimize").catch(() => {});
       await client.execute("CREATE TABLE IF NOT EXISTS schema_meta (k TEXT PRIMARY KEY, v INTEGER NOT NULL)");
       await client.execute({ sql: "INSERT OR REPLACE INTO schema_meta (k, v) VALUES ('version', ?)", args: [SCHEMA_VERSION] });
     } catch (e) {
@@ -474,8 +482,12 @@ export function listRepos(order: "recent" | "popular" | "rising", limit = 6): Pr
 }
 
 // Fills in facets for repos saved before they existed (or with an older format), from the stored manual.
-// Cheap once done: it only reads rows that still need it, a batch at a time.
+// Its query can't use an index (NOT LIKE), so it scans the whole table, ~70 KB of data a row: once nothing is left
+// to fill, this instance stops asking. New repos get their facets when they're saved (saveRepo), and a new
+// FACETS_VERSION comes with a deploy, which starts fresh instances.
+let facetsFilled = false;
 export function ensureFacets(maxRows = 400): Promise<number> {
+  if (facetsFilled) return Promise.resolve(0);
   return safely(0, async (c) => {
     let done = 0;
     while (done < maxRows) {
@@ -483,7 +495,10 @@ export function ensureFacets(maxRows = 400): Promise<number> {
         sql: "SELECT key, data FROM repos WHERE facets IS NULL OR facets NOT LIKE ? LIMIT 25",
         args: [` ${FACETS_VERSION} %`],
       });
-      if (!rows.length) break;
+      if (!rows.length) {
+        facetsFilled = true;
+        break;
+      }
       for (const r of rows) {
         let facets = ` ${FACETS_VERSION} `;
         try {
