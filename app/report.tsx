@@ -21,6 +21,7 @@ import { proUrl, SIGNED_IN_COOKIE } from "@/lib/site";
 import { disconnect, fetchPrivate, PrivateAccess } from "./private";
 import { CarbonAd } from "./carbon";
 import { ArchitectureDiagram } from "./inspection-charts";
+import { REPO_PRICE } from "./buy-repo";
 import { SevIcon } from "./sev-icon";
 import { GitHubMark } from "./github-mark";
 import type { Inspection } from "@/lib/inspection/types";
@@ -1488,7 +1489,7 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
 // manual adds no Claude cost. Pro members without a report get a way to make one; everyone else a locked preview.
 // The saved Deep Inspection for this repo, fetched once for the card and the diagram together. Reading it is free
 // and never starts a new inspection.
-type Saved = { signedIn: boolean; pro: boolean; inspection: Inspection | null; teaser: Teaser | null };
+type Saved = { signedIn: boolean; pro: boolean; bought?: boolean; inspection: Inspection | null; teaser: Teaser | null };
 const savedCache = new Map<string, Promise<Saved | null>>();
 function useSavedInspection(repo: string): Saved | null {
   const [state, setState] = useState<Saved | null>(null);
@@ -1514,9 +1515,10 @@ function useSavedInspection(repo: string): Saved | null {
 // much it matters, and what to look at first, with the full report a click away. Otherwise: what it is, and the way in.
 function InspectionCard({ repo }: { repo: string }) {
   const state = useSavedInspection(repo);
-  const r = state?.pro ? state.inspection : null;
-  if (!state?.pro && state?.teaser) return <InspectionFree repo={repo} t={state.teaser} />;
-  if (!r) return <InspectionTeaser repo={repo} pro={Boolean(state?.pro)} />;
+  const has = Boolean(state?.pro || state?.bought); // Pro, or this repo's report bought once
+  const r = has ? state!.inspection : null;
+  if (!has && state?.teaser) return <InspectionFree repo={repo} t={state.teaser} />;
+  if (!r) return <InspectionTeaser repo={repo} pro={has} />;
   return <InspectionPreview repo={repo} r={r} />;
 }
 
@@ -1564,7 +1566,7 @@ function InspectionFree({ repo, t }: { repo: string; t: Teaser }) {
           {locked > 0 ? `See the other ${locked} finding${locked === 1 ? "" : "s"} →` : `See all ${t.checks} checks →`}
         </Link>
         <span className="note">
-          {t.checks} checks · {timeAgo(t.scannedAt)}
+          With Pro, or {REPO_PRICE} once for this repo · {t.checks} checks · {timeAgo(t.scannedAt)}
           {t.commit && <> · commit {t.commit.slice(0, 7)}</>}
         </span>
       </div>
@@ -1593,6 +1595,7 @@ function InspectionTeaser({ repo, pro }: { repo: string; pro: boolean }) {
         <i style={{ width: "74%" }} />
       </span>
       <span className="insp-teaser-pitch">See what needs attention before you invest time in this repo.</span>
+      {!pro && <span className="insp-preview-counts">With Pro, or {REPO_PRICE} once for this repo with its PDF manuals.</span>}
       <span className="btn insp-preview-go">{pro ? "Inspect this repo →" : "Unlock Deep Inspection →"}</span>
     </Link>
   );

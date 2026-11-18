@@ -29,7 +29,14 @@ const REPORT = {
 };
 
 mock.module(lib("viewer.ts"), { exports: { viewer: async () => ({ user: signedIn && { ...signedIn, token: "t" }, settle: (r: unknown) => r }), isAdmin: () => false } });
-mock.module(lib("pro.ts"), { exports: { isPro: async (id: number) => proUsers.has(id), proFor: async () => ({ pro: false, subscription: null }) } });
+const bought = new Set<string>(); // "id:owner/name", a repo report bought once
+mock.module(lib("pro.ts"), {
+  exports: {
+    isPro: async (id: number) => proUsers.has(id),
+    proFor: async () => ({ pro: false, subscription: null }),
+    accessFor: async (id: number, repo: string) => ({ pro: proUsers.has(id), bought: !proUsers.has(id) && bought.has(`${id}:${repo.toLowerCase()}`) }),
+  },
+});
 mock.module(lib("inspection/index.ts"), {
   exports: {
     saved: async () => ({ inspection: REPORT, fresh: true }),
@@ -43,8 +50,8 @@ mock.module(lib("inspection/index.ts"), {
 
 const { GET, POST } = await import("../app/api/inspection/route");
 const get = async () => (await GET(new Request("http://localhost/api/inspection?repo=acme/tool"))).json();
-const post = async () => {
-  const res = await POST(new Request("http://localhost/api/inspection", { method: "POST", body: JSON.stringify({ repo: "acme/tool" }) }));
+const post = async (rescan = false) => {
+  const res = await POST(new Request("http://localhost/api/inspection", { method: "POST", body: JSON.stringify({ repo: "acme/tool", rescan }) }));
   return { status: res.status, body: await res.json(), cache: res.headers.get("Cache-Control") };
 };
 
@@ -84,4 +91,19 @@ test("Pro: the saved report, a new one on request, never cached by the CDN", asy
   assert.equal(r.status, 200);
   assert.equal(r.cache, "private, no-store");
   assert.deepEqual(built, ["acme/tool:2"]);
+});
+
+test("one repo bought: its full report, rebuilt when old but not on request; other repos stay locked", async () => {
+  signedIn = { id: 3, login: "buyer" };
+  bought.add("3:acme/tool");
+  built.length = 0;
+  const g = await get();
+  assert.equal(g.pro, false);
+  assert.equal(g.bought, true);
+  assert.deepEqual(g.inspection, REPORT);
+  const r = await post(true);
+  assert.equal(r.status, 200);
+  assert.deepEqual(built, ["acme/tool:3"]);
+  const other = await GET(new Request("http://localhost/api/inspection?repo=acme/other"));
+  assert.equal((await other.json()).inspection, null);
 });

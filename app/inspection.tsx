@@ -7,6 +7,7 @@ import { toMarkdown } from "@/lib/inspection/markdown";
 import type { Answer, Audience, Finding, GradeId, Inspection, Level, SectionId, StepPhase } from "@/lib/inspection/types";
 import { ArchitectureDiagram, ContinuityBars, ReleaseTimeline, RepliesChart, StarHistory } from "./inspection-charts";
 import { SevIcon } from "./sev-icon";
+import { BuyRepo } from "./buy-repo";
 import { GitHubMark } from "./github-mark";
 import { HEADLINE } from "@/lib/inspection/types";
 import { proUrl } from "@/lib/site";
@@ -14,7 +15,7 @@ import { proUrl } from "@/lib/site";
 // Deep Inspection (Pro): the report page. Pro members see the saved report straight away (and a fresh one is built
 // when there's none, or it's a few days old); everyone else sees what it covers and the way to Pro.
 
-type Status = { signedIn: boolean; login?: string | null; pro: boolean; left?: number | null; inspection: Inspection | null; fresh?: boolean };
+type Status = { signedIn: boolean; login?: string | null; pro: boolean; bought?: boolean; left?: number | null; inspection: Inspection | null; fresh?: boolean };
 
 const AUDIENCE_KEY = "gitmanual-inspection-audience";
 
@@ -64,7 +65,7 @@ export function InspectionView({ repo }: { repo: string }) {
       .then((r) => r.json())
       .then((s: Status) => {
         setStatus(s);
-        if (!s.pro) return;
+        if (!s.pro && !s.bought) return;
         if (s.inspection) setReport(s.inspection);
         // None yet, or a few days old: make one now (the old one stays on screen meanwhile).
         if (!s.inspection || !s.fresh) run();
@@ -74,6 +75,16 @@ export function InspectionView({ repo }: { repo: string }) {
   }, [repo]);
 
   const [owner, name] = repo.split("/");
+  const has = Boolean(status?.pro || status?.bought);
+  // Back from buying this repo's report (app/api/pro/report/done adds ?bought=1).
+  const [justBought, setJustBought] = useState(false);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.has("bought")) return;
+    setJustBought(true);
+    q.delete("bought");
+    window.history.replaceState(null, "", `${window.location.pathname}${q.size ? `?${q}` : ""}${window.location.hash}`);
+  }, []);
   return (
     <article className="wrap insp">
       <header className="insp-head">
@@ -92,20 +103,26 @@ export function InspectionView({ repo }: { repo: string }) {
         </p>
       </header>
 
+      {justBought && status?.bought && (
+        <p className="pro-thanks" role="status">
+          Thank you! This report is yours, with the PDF manuals for {name}. Find them any time in{" "}
+          <Link href="/profile/reports">Your reports</Link>.
+        </p>
+      )}
       {!status && !error && <Skeleton />}
-      {status && !status.pro && <Locked repo={repo} signedIn={status.signedIn} login={status.login ?? null} />}
+      {status && !has && <Locked repo={repo} signedIn={status.signedIn} login={status.login ?? null} />}
       {error && !busy && (
         <div className="insp-error" role="alert">
           <p>{error}</p>
-          {status?.pro && (
+          {has && (
             <button className="btn" onClick={() => run()}>
               Try again
             </button>
           )}
         </div>
       )}
-      {status?.pro && busy && !report && <Working />}
-      {report && <Report report={report} audience={audience} busy={busy} onRescan={() => run(true)} left={status?.left ?? null} />}
+      {has && busy && !report && <Working />}
+      {report && <Report report={report} audience={audience} busy={busy} onRescan={status?.pro ? () => run(true) : undefined} left={status?.left ?? null} />}
     </article>
   );
 }
@@ -183,7 +200,7 @@ function Locked({ repo, signedIn, login }: { repo: string; signedIn: boolean; lo
         </ul>
       </div>
       <div className="insp-locked-card">
-        {signedIn && login && <p className="insp-locked-hi">Hi @{login}, Deep Inspection is part of GitManual Pro.</p>}
+        {signedIn && login && <p className="insp-locked-hi">Hi @{login}, Deep Inspection comes with GitManual Pro, or for this repo alone.</p>}
         <h2 id="insp-locked-h">Find the gaps before you install it</h2>
         <p>
           Deep Inspection reads the whole repo and checks its setup steps against its files: missing scripts and files, version conflicts, settings the
@@ -193,6 +210,12 @@ function Locked({ repo, signedIn, login }: { repo: string; signedIn: boolean; lo
           {!signedIn && <GitHubMark />}
           {signedIn ? "Get Pro to inspect this repo" : "Sign in with GitHub to continue"}
         </a>
+        {signedIn && (
+          <div className="insp-locked-once">
+            <BuyRepo repo={repo} back={`/${repo}/inspection`} signedIn className="btn pro-btn" />
+            <small>One time: this report and the PDF manuals for this repo, kept in your profile. Tax added where it applies.</small>
+          </div>
+        )}
         <ul>
           {HEADLINE.map((h) => (
             <li key={h.id}>{h.q}</li>
@@ -203,7 +226,7 @@ function Locked({ repo, signedIn, login }: { repo: string; signedIn: boolean; lo
         </a>
         <small>
           {signedIn
-            ? "Part of GitManual Pro, with unlimited AI answers, PDF manuals and no ads."
+            ? "Pro covers every repo, with unlimited AI answers, PDF manuals and no ads."
             : "Free to sign in. Deep Inspection is part of GitManual Pro; members go straight to the report."}
         </small>
       </div>
@@ -234,7 +257,7 @@ function Report({
   report: Inspection;
   audience: Audience;
   busy: boolean;
-  onRescan: () => void;
+  onRescan?: () => void; // Pro only; a bought report is rebuilt when it gets old
   left: number | null;
 }) {
   const byId = new Map(report.findings.map((f) => [f.id, f]));
@@ -268,6 +291,7 @@ function Report({
               · <span className="spinner" /> Updating…
             </>
           ) : (
+            onRescan && (
             <>
               {" "}
               ·{" "}
@@ -275,6 +299,7 @@ function Report({
                 Inspect again
               </button>
             </>
+            )
           )}
           {" "}
           · <MarkdownExport report={report} audience={audience} />

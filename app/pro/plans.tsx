@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { sitePath } from "@/lib/site";
+import { BuyRepo, REPO_PRICE } from "../buy-repo";
 import { OPEN_CONTACT } from "../ui";
 
 // The plan cards on /pro. Prices come from Stripe (rendered on the server); who's signed in and whether they have
@@ -20,6 +21,13 @@ type Status = {
 const money = (cents: number, currency: string) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency, minimumFractionDigits: cents % 100 ? 2 : 0 }).format(cents / 100);
 const date = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+
+// "/owner/name/…" → "owner/name", for pages that are a repo's (not /shelf, /lists, …).
+const NOT_REPOS = new Set(["about", "admin", "api", "contact", "developers", "finds", "go", "how-it-works", "lists", "mcp", "privacy", "private", "pro", "profile", "shelf", "terms"]);
+function repoOf(path: string | null): string | null {
+  const m = path?.match(/^\/([\w.-]+)\/([\w.-]+)/);
+  return m && !NOT_REPOS.has(m[1].toLowerCase()) ? `${m[1]}/${m[2]}` : null;
+}
 
 // One line of a plan: an icon tile, a short point and a few words more.
 const ICONS = {
@@ -107,6 +115,8 @@ export function Plans({ prices: saved, free, contact }: { prices: Prices; free: 
   const prices = saved ?? status?.prices ?? null;
   const saving = prices ? Math.round((1 - prices.year / (prices.month * 12)) * 100) : 0;
   const sub = status?.subscription;
+  // Came from a repo's page (the PDF button, a locked report): that one repo can be bought on its own.
+  const repo = repoOf(back);
 
   return (
     <>
@@ -127,6 +137,17 @@ export function Plans({ prices: saved, free, contact }: { prices: Prices; free: 
         <p className="pro-thanks" role="status">
           You already have Pro. <a href={back}>Back to where you were</a>
         </p>
+      )}
+      {repo && !status?.pro && (
+        <section className="pro-once" aria-labelledby="pro-once-h">
+          <div>
+            <h2 id="pro-once-h">
+              Only need <b>{repo}</b>?
+            </h2>
+            <p>Get its Deep Inspection and PDF manuals for {REPO_PRICE}, one time. They stay in your profile; no subscription.</p>
+          </div>
+          <BuyRepo repo={repo} back={back!} signedIn={Boolean(status?.login)} className="btn pro-btn" />
+        </section>
       )}
       <div className="pro-plans">
         <section className="pro-card" aria-labelledby="plan-free">

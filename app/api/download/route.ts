@@ -4,7 +4,7 @@ import { manualFile } from "@/lib/download";
 import { GitHubError } from "@/lib/github";
 import { firstTime, visitor } from "@/lib/limit";
 import { OS_LIST, OS_SLUG, type OS } from "@/lib/os";
-import { isPro } from "@/lib/pro";
+import { accessFor } from "@/lib/pro";
 import { proUrl } from "@/lib/site";
 import { PRO_ENABLED } from "@/lib/stripe";
 import { viewer } from "@/lib/viewer";
@@ -12,7 +12,8 @@ import { viewer } from "@/lib/viewer";
 // A public repo's manual for one system as a file (the "Download manual" menu on manual pages):
 //   GET /api/download?repo=owner/name&os=mac&format=pdf   PDF
 //   GET /api/download?repo=owner/name&os=mac&format=md    Markdown
-// Both are GitManual Pro: signed-out visitors are sent to sign in, others to /pro.
+// Both are GitManual Pro, or come with the repo's report bought once: signed-out visitors are sent to sign in,
+// others to /pro (which offers that one repo too).
 // Under /api so the GitHub sign-in cookie comes along. Downloads are counted per repo and day, like the demand test.
 export const maxDuration = 60;
 
@@ -29,7 +30,8 @@ export async function GET(req: Request) {
   const v = await viewer();
   const settle = v.settle;
   if (!v.user) return NextResponse.redirect(new URL(`/api/github/connect?signin=1&back=${encodeURIComponent(`${back}#pdf`)}`, req.url));
-  if (!(await isPro(v.user.id))) return settle(NextResponse.redirect(new URL(`${proUrl(`${back}#pdf`)}&from=${format}`, req.url)));
+  const access = await accessFor(v.user.id, repo);
+  if (!access.pro && !access.bought) return settle(NextResponse.redirect(new URL(`${proUrl(`${back}#pdf`)}&from=${format}`, req.url)));
 
   try {
     const file = await manualFile(repo, os, format, req.headers);

@@ -1,7 +1,7 @@
 // Creates GitManual Pro in the Stripe account that STRIPE_SECRET_KEY belongs to: one product and a monthly and a
-// yearly price, found by their lookup keys (lib/stripe.ts). Safe to run again: anything already there is kept.
+// yearly price, plus the one-time repo report (a product with one price), all found by their lookup keys (lib/stripe.ts). Safe to run again: anything already there is kept.
 // Run once in the sandbox and once with the live key:  npm run stripe:setup
-import { PLANS, PRODUCT, stripe, type Plan } from "../lib/stripe";
+import { PLANS, PRODUCT, REPO_REPORT, stripe, type Plan } from "../lib/stripe";
 
 async function main() {
   const s = stripe();
@@ -43,6 +43,34 @@ async function main() {
     });
     if (have) await s.prices.update(have.id, { active: false });
     console.log(`${plan}: ${have ? `replaced ${have.id} (${(have.unit_amount ?? 0) / 100}) with` : "created"} ${p.id} (${PRODUCT.prices[plan] / 100} usd)`);
+  }
+
+  // The one-time repo report: its own product, so receipts and the Stripe dashboard name it apart from Pro.
+  const [had] = (await s.prices.list({ lookup_keys: [REPO_REPORT.lookupKey], limit: 1, expand: ["data.product"] })).data;
+  let reportProduct = (had?.product as { id?: string } | undefined)?.id;
+  if (!reportProduct) {
+    const found = await s.products.search({ query: `name:'${REPO_REPORT.name}' AND active:'true'` }).catch(() => null);
+    reportProduct = found?.data[0]?.id;
+  }
+  if (!reportProduct) {
+    reportProduct = (await s.products.create({ name: REPO_REPORT.name, description: REPO_REPORT.description, tax_code: REPO_REPORT.taxCode })).id;
+    console.log(`Created product ${reportProduct}`);
+  } else {
+    await s.products.update(reportProduct, { description: REPO_REPORT.description, tax_code: REPO_REPORT.taxCode });
+  }
+  if (had && had.unit_amount === REPO_REPORT.amount) {
+    console.log(`report: ${had.id} already there (${(had.unit_amount ?? 0) / 100} ${had.currency})`);
+  } else {
+    const p = await s.prices.create({
+      product: reportProduct,
+      currency: "usd",
+      unit_amount: REPO_REPORT.amount,
+      lookup_key: REPO_REPORT.lookupKey,
+      transfer_lookup_key: Boolean(had),
+      nickname: "Repo report (one time)",
+    });
+    if (had) await s.prices.update(had.id, { active: false });
+    console.log(`report: ${had ? `replaced ${had.id} with` : "created"} ${p.id} (${REPO_REPORT.amount / 100} usd)`);
   }
 }
 

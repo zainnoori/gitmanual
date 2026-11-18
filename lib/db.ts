@@ -104,6 +104,16 @@ const SCHEMA = `
     cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
     updated_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS purchases (
+    session TEXT PRIMARY KEY,       -- Stripe Checkout session id: the same payment is never recorded twice
+    github_id INTEGER NOT NULL,     -- who paid
+    repo TEXT NOT NULL,             -- lower-case owner/name it unlocks: its Deep Inspection and PDF manuals
+    full_name TEXT NOT NULL,        -- owner/Name as shown
+    amount INTEGER NOT NULL,        -- cents, before tax
+    currency TEXT NOT NULL,
+    paid_at INTEGER NOT NULL        -- ms
+  );
+  CREATE INDEX IF NOT EXISTS purchases_owner ON purchases (github_id, repo);
   CREATE TABLE IF NOT EXISTS interest (
     feature TEXT NOT NULL,          -- a feature not built yet, e.g. "pdf", whose button only says "coming soon"
     day TEXT NOT NULL,              -- UTC date, YYYY-MM-DD
@@ -154,7 +164,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2; // 2: purchases
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -910,6 +920,43 @@ export async function saveSubscription(s: SubscriptionRow, now = Date.now()): Pr
       args: [s.githubId, s.customer, s.subscription, s.status, s.plan, s.periodEnd, s.cancelAtPeriodEnd ? 1 : 0, now],
     }),
   );
+}
+
+// ── One-time repo reports (lib/pro.ts recordPurchase, /profile/reports) ────────────────────────────────────────────
+
+export type Purchase = { session: string; githubId: number; repo: string; fullName: string; amount: number; currency: string; paidAt: number };
+
+// Idempotent: the return from checkout and Stripe's webhook both record the same session.
+export async function savePurchase(p: Purchase): Promise<void> {
+  await strictly((c) =>
+    c.execute({
+      sql: "INSERT OR IGNORE INTO purchases (session, github_id, repo, full_name, amount, currency, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      args: [p.session, p.githubId, p.repo.toLowerCase(), p.fullName, p.amount, p.currency, p.paidAt],
+    }),
+  );
+}
+
+// Strict: a failing database answers with an error rather than "not bought", and callers treat errors as no access.
+export async function hasPurchase(githubId: number, repo: string): Promise<boolean> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT 1 FROM purchases WHERE github_id = ? AND repo = ? LIMIT 1", args: [githubId, repo.toLowerCase()] });
+    return rows.length > 0;
+  });
+}
+
+export async function purchasesFor(githubId: number): Promise<Purchase[]> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT * FROM purchases WHERE github_id = ? ORDER BY paid_at DESC", args: [githubId] });
+    return rows.map((r) => ({
+      session: String(r.session),
+      githubId: Number(r.github_id),
+      repo: String(r.repo),
+      fullName: String(r.full_name),
+      amount: Number(r.amount),
+      currency: String(r.currency),
+      paidAt: Number(r.paid_at),
+    }));
+  });
 }
 
 export async function subscriptionFor(githubId: number): Promise<SubscriptionRow | null> {

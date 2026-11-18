@@ -19,9 +19,39 @@ export const PRODUCT = {
   prices: { month: 899, year: 4800 }, // US cents
 };
 
+// One repo, paid once: its Deep Inspection and its PDF manuals, kept on the buyer's account (the `purchases` table,
+// /profile/reports). A product of its own with a one-time price, also made by `npm run stripe:setup`.
+export const REPO_REPORT = {
+  lookupKey: "gitmanual_repo_report",
+  name: "GitManual repo report",
+  description: "Deep Inspection and PDF setup manuals for one public GitHub repo, kept on your account.",
+  taxCode: PRODUCT.taxCode,
+  amount: 499, // US cents
+};
+
+// The live one-time price, read from Stripe and kept for ten minutes per server process.
+let reportCached: { at: number; price: PlanPrice } | null = null;
+export async function reportPrice(): Promise<PlanPrice | null> {
+  if (reportCached && Date.now() - reportCached.at < 10 * 60 * 1000) return reportCached.price;
+  try {
+    const { data } = await stripe().prices.list({ lookup_keys: [REPO_REPORT.lookupKey], active: true, limit: 1 });
+    const p = data[0];
+    if (!p) {
+      console.error("gitmanual pro: the repo report price isn't in Stripe; run npm run stripe:setup");
+      return null;
+    }
+    reportCached = { at: Date.now(), price: { id: p.id, amount: p.unit_amount ?? 0, currency: p.currency } };
+    return reportCached.price;
+  } catch (e) {
+    console.error("gitmanual pro:", e);
+    return null;
+  }
+}
+
 // What the webhook (app/api/stripe/webhook) listens for; pick the same events on the endpoint in Stripe.
 export const WEBHOOK_EVENTS = [
   "checkout.session.completed",
+  "checkout.session.async_payment_succeeded", // a repo report paid by a method that confirms later
   "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",

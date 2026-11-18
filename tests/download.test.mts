@@ -20,7 +20,14 @@ const made: string[] = [];
 mock.module(lib("viewer.ts"), {
   exports: { viewer: async () => ({ user: signedIn && { ...signedIn, token: "t" }, settle: (r: unknown) => r }), isAdmin: () => false },
 });
-mock.module(lib("pro.ts"), { exports: { isPro: async () => pro, proFor: async () => ({ pro, subscription: null }) } });
+let boughtRepo: string | null = null; // the one repo report this account bought
+mock.module(lib("pro.ts"), {
+  exports: {
+    isPro: async () => pro,
+    proFor: async () => ({ pro, subscription: null }),
+    accessFor: async (_id: number, repo: string) => ({ pro, bought: !pro && repo.toLowerCase() === boughtRepo }),
+  },
+});
 mock.module(lib("download.ts"), {
   exports: {
     manualFile: async (repo: string, os: string, format: string) => {
@@ -80,6 +87,14 @@ test("PDF: off while Pro is off; sign-in first; then Pro only", async () => {
   assert.equal(res.status, 307);
   assert.match(res.headers.get("location")!, /\/pro\?back=%2Fowner%2Fname%2Fwindows%23pdf&from=pdf$/);
   assert.equal(made.length, before); // nothing was made for anyone without Pro
+
+  // A bought report opens that repo's PDFs only.
+  boughtRepo = "owner/name";
+  res = await get("repo=owner/name&os=windows&format=pdf");
+  assert.equal(res.status, 200);
+  res = await get("repo=owner/other&os=windows&format=pdf");
+  assert.equal(res.status, 307);
+  boughtRepo = null;
 
   pro = true;
   res = await get("repo=owner/name&os=windows&format=pdf");

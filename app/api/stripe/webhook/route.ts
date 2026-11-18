@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
-import { syncSubscription } from "@/lib/pro";
+import { recordPurchase, syncSubscription } from "@/lib/pro";
 import { PRO_ENABLED, stripe, WEBHOOK_EVENTS as EVENTS } from "@/lib/stripe";
 
 // Stripe tells the site when a subscription starts, renews, changes or ends; that's what turns Pro on and off.
+// It also records one-time repo reports (checkout.session.completed with mode "payment").
 // Every event is checked against STRIPE_WEBHOOK_SECRET, and the subscription is then read fresh from Stripe.
 // Set the endpoint in Stripe (Developers → Webhooks) to https://<site>/api/stripe/webhook with WEBHOOK_EVENTS (lib/stripe.ts).
 export async function POST(req: Request) {
@@ -23,6 +24,10 @@ export async function POST(req: Request) {
       const githubId = Number(s.client_reference_id);
       if (s.mode === "subscription" && s.subscription && Number.isSafeInteger(githubId) && githubId > 0)
         await syncSubscription(typeof s.subscription === "string" ? s.subscription : s.subscription.id, githubId);
+      // A one-time repo report (app/api/pro/report). recordPurchase checks it's ours and paid.
+      if (s.mode === "payment") await recordPurchase(s);
+    } else if (event.type === "checkout.session.async_payment_succeeded") {
+      await recordPurchase(event.data.object);
     } else if ((EVENTS as readonly string[]).includes(event.type) && event.type.startsWith("customer.subscription.")) {
       await syncSubscription((event.data.object as Stripe.Subscription).id);
     }

@@ -467,6 +467,11 @@ function AccountMenu({ pro: proSite }: { pro: boolean }) {
         <Link role="menuitem" href="/profile/saved">
           Saved repos
         </Link>
+        {me.proEnabled && (
+          <Link role="menuitem" href="/profile/reports">
+            Your reports
+          </Link>
+        )}
         {me.proEnabled && proSite && (
           <Link role="menuitem" href="/pro">
             {me.pro ? "Your Pro plan" : "Get GitManual Pro"}
