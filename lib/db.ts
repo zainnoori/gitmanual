@@ -482,34 +482,39 @@ export function listRepos(order: "recent" | "popular" | "rising", limit = 6): Pr
 }
 
 // Fills in facets for repos saved before they existed (or with an older format), from the stored manual.
-// Its query can't use an index (NOT LIKE), so it scans the whole table, ~70 KB of data a row: once nothing is left
-// to fill, this instance stops asking. New repos get their facets when they're saved (saveRepo), and a new
-// FACETS_VERSION comes with a deploy, which starts fresh instances.
+// The check selects only key, so it reads repos_shelf (key and facets) instead of the table: a table scan reads every row's
+// manual (~70 KB each, ~160 MB on 2026-11-18), and a crawler opening 20 lists at once on a fresh instance ran 20 of
+// those together and timed out the whole site. Calls made while one is running share it. Once nothing is left to
+// fill, this instance stops asking; new repos get their facets in saveRepo, and a new FACETS_VERSION comes with a deploy.
 let facetsFilled = false;
+let facetsRun: Promise<number> | null = null;
 export function ensureFacets(maxRows = 400): Promise<number> {
   if (facetsFilled) return Promise.resolve(0);
-  return safely(0, async (c) => {
+  facetsRun ??= safely(0, async (c) => {
     let done = 0;
     while (done < maxRows) {
-      const { rows } = await c.execute({
-        sql: "SELECT key, data FROM repos WHERE facets IS NULL OR facets NOT LIKE ? LIMIT 25",
+      const { rows: keys } = await c.execute({
+        sql: "SELECT key FROM repos WHERE facets IS NULL OR facets NOT LIKE ? LIMIT 25",
         args: [` ${FACETS_VERSION} %`],
       });
-      if (!rows.length) {
+      if (!keys.length) {
         facetsFilled = true;
         break;
       }
-      for (const r of rows) {
+      for (const k of keys) {
+        const key = String(k.key);
+        const { rows } = await c.execute({ sql: "SELECT data FROM repos WHERE key = ?", args: [key] });
         let facets = ` ${FACETS_VERSION} `;
         try {
-          facets = facetsOf(JSON.parse(String(r.data)));
+          facets = facetsOf(JSON.parse(String(rows[0]?.data)));
         } catch {} // an unreadable manual just gets no facts, so it isn't retried forever
-        await c.execute({ sql: "UPDATE repos SET facets = ? WHERE key = ?", args: [facets, String(r.key)] });
+        await c.execute({ sql: "UPDATE repos SET facets = ? WHERE key = ?", args: [facets, key] });
       }
-      done += rows.length;
+      done += keys.length;
     }
     return done;
-  });
+  }).finally(() => (facetsRun = null));
+  return facetsRun;
 }
 
 // Repos whose facets include every token in `all` and at least one in `any`, most-starred first.
