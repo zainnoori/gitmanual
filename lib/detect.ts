@@ -127,6 +127,28 @@ function gemfileToolsOnly(gemfile: string): string[] | null {
 
 const MANIFEST = /(^|\/)(package\.json|pyproject\.toml|requirements\.txt|go\.mod|Cargo\.toml|Gemfile|composer\.json|pom\.xml|pubspec\.yaml|[^/]+\.csproj|CMakeLists\.txt)$/;
 
+// Files that make the repo root a project of its own (beyond MANIFEST): with any of these, the root is where setup starts.
+const ROOT_PROJECT = /^(Dockerfile|docker-compose\.ya?ml|compose\.ya?ml|Makefile|justfile|setup\.py|Pipfile|environment\.yml|build\.gradle(\.kts)?|deno\.jsonc?|mix\.exs|Package\.swift|meson\.build|SConstruct|pnpm-workspace\.yaml|build\.zig|Brewfile|global\.json|Directory\.Build\.props|build\.(sh|ps1|cmd)|[^/]+\.(sln|slnx|slnf|fsproj|xcodeproj|xcworkspace))$/;
+// Folders that hold something next to the project, never the project itself.
+const SIDE_FOLDER = /^(\.[^/]*|examples?|samples?|demos?|docs?|documentation|website|site|tests?|benchmarks?|bench|scripts|tools|fixtures|assets|bindings|vendor|third[_-]?party)$/i;
+
+// The one folder that holds the whole project, when the root holds none (jub0t/Concat keeps its Cargo workspace in
+// src/). Only when it's clear: nothing to build at the root, and exactly one folder one level down with a project
+// file. Two or more (frontend/ and backend/) are separate parts the README has to explain, so the root stays.
+export function mainSubfolder(entries: TreeEntry[]): string | null {
+  const paths = entries.map((e) => e.path);
+  if (paths.some((p) => !p.includes("/") && (MANIFEST.test(p) || ROOT_PROJECT.test(p)))) return null;
+  const dirs = new Set(
+    paths.filter((p) => p.split("/").length === 2 && MANIFEST.test(p)).map((p) => p.split("/")[0]).filter((d) => !SIDE_FOLDER.test(d)),
+  );
+  return dirs.size === 1 ? [...dirs][0] : null;
+}
+
+// That folder's entries, with paths as if it were the root.
+export function inFolder(entries: TreeEntry[], dir: string): TreeEntry[] {
+  return entries.filter((e) => e.path.startsWith(`${dir}/`)).map((e) => ({ ...e, path: e.path.slice(dir.length + 1) }));
+}
+
 export function selectFiles(entries: TreeEntry[]): TreeEntry[] {
   const picked: TreeEntry[] = [];
   let workflows = 0;
@@ -305,6 +327,9 @@ export function analyze(
   allPaths: string[],
   language: string | null = null, // GitHub's main language, to tell a project's own stack from its helper tooling
   description: string | null = null,
+  // workdir: the folder the project lives in (mainSubfolder), whose files and paths are passed as the root's; setup
+  // starts with cd-ing into it. treePaths: the repo's real paths, for the list of other projects in it.
+  opts: { workdir?: string | null; treePaths?: string[] } = {},
 ): Analysis {
   const has = (p: string) => p in files || present.has(p);
   const stacks: string[] = [];
@@ -496,7 +521,13 @@ export function analyze(
     installCmds.push("cargo build");
     testCmds.push("cargo test");
     const rootPackage = /^\[package\]/m.test(files["Cargo.toml"]);
+    // In a workspace, a crate named after the repo with a main.rs (crates/zed, alacritty/) is the app. Not a
+    // library of that name (tauri) or one with several programs in src/bin (goose): those keep the hint.
+    const appCrate = allPaths
+      .map((p) => p.match(/^((?:crates\/)?([^/]+))\/Cargo\.toml$/))
+      .find((m) => m && m[2].toLowerCase() === repo.repo.toLowerCase() && allPaths.includes(`${m[1]}/src/main.rs`))?.[2];
     if (rootPackage) runCmds.push("cargo run");
+    else if (/\[workspace\]/.test(files["Cargo.toml"]) && appCrate) runCmds.push(`cargo run -p ${appCrate}`);
     else if (/\[workspace\]/.test(files["Cargo.toml"])) hints.push("Cargo workspace — pick a crate with `cargo run -p <name>`.");
   }
 
@@ -766,10 +797,18 @@ export function analyze(
     steps.push(
       {
         title: "Clone the repository",
-        commands: [`git clone ${submodules ? "--recurse-submodules " : ""}https://github.com/${repo.owner}/${repo.repo}.git`, `cd ${repo.repo}`],
+        commands: [
+          `git clone ${submodules ? "--recurse-submodules " : ""}https://github.com/${repo.owner}/${repo.repo}.git`,
+          opts.workdir ? `cd ${repo.repo}/${opts.workdir}` : `cd ${repo.repo}`,
+        ],
         note:
-          (os === "windows" ? "Needs Git: winget install Git.Git" : os === "mac" ? "Needs Git: xcode-select --install" : "") +
-          (submodules ? `${os === "linux" ? "" : ". "}The repo uses git submodules, so the clone fetches them too.` : "") || undefined,
+          [
+            os === "windows" ? "Needs Git: winget install Git.Git" : os === "mac" ? "Needs Git: xcode-select --install" : "",
+            submodules ? "The repo uses git submodules, so the clone fetches them too." : "",
+            opts.workdir ? `The project lives in its ${opts.workdir}/ folder: every step below runs there.` : "",
+          ]
+            .filter(Boolean)
+            .join(". ") || undefined,
       },
     );
     if (runtimes.length || tools.length) {
@@ -861,7 +900,9 @@ export function analyze(
     (runCmds.length || testCmds.length || useReadmeSteps ? 0 : 2);
   const label = score <= 2 ? "Easy" : score <= 6 ? "Moderate" : "Involved";
 
-  const otherManifests = allPaths.filter((p) => p.includes("/") && MANIFEST.test(p) && !p.includes("node_modules")).slice(0, 15);
+  const otherManifests = (opts.treePaths ?? allPaths)
+    .filter((p) => p.includes("/") && MANIFEST.test(p) && !p.includes("node_modules") && !(opts.workdir && p.split("/").length === 2 && p.startsWith(`${opts.workdir}/`)))
+    .slice(0, 15);
 
   return {
     stacks: dedupe(stacks, (s) => s),

@@ -1,4 +1,4 @@
-import { analyze, presentPaths, selectFiles, type Analysis } from "./detect";
+import { analyze, inFolder, mainSubfolder, presentPaths, selectFiles, type Analysis } from "./detect";
 import { after } from "next/server";
 import { CACHE_MS, countView, getCached, repoKey, saveRepo } from "./db";
 import { getFiles, getHeadSha, getLatestRelease, getRepoMeta, getTree, GitHubError, type RepoMeta, type RepoRef } from "./github";
@@ -88,11 +88,32 @@ async function analyzeRepo(ref: RepoRef, token?: string): Promise<RepoData> {
   ]);
   const docs = findSetupDocs(entries);
   const docEntry = docs[0] && entries.find((e) => e.path === docs[0].path);
-  const files = await getFiles(ref, branch, [...selectFiles(entries), ...(docEntry ? [docEntry] : [])], token);
+  const rootFiles = await getFiles(ref, branch, [...selectFiles(entries), ...(docEntry ? [docEntry] : [])], token);
+  // A project kept whole in one folder (src/Cargo.toml and nothing at the root): its files are read as the root's,
+  // and the steps start in that folder. The root's README and workflows stay.
+  const workdir = mainSubfolder(entries);
+  const sub = workdir ? inFolder(entries, workdir) : [];
+  const subPicked = selectFiles(sub).filter((e) => !/^readme(\.\w+)?$/i.test(e.path) && !(e.path in rootFiles));
+  const subFiles = subPicked.length
+    ? await getFiles(ref, branch, subPicked.map((e) => ({ ...e, path: `${workdir}/${e.path}` })), token)
+    : {};
+  const files = { ...rootFiles, ...subFiles }; // real paths, as listed under "Files we read"
+  const asRoot = { ...rootFiles, ...Object.fromEntries(Object.entries(subFiles).map(([p, t]) => [p.slice(workdir!.length + 1), t])) };
   // Project files that say which system the code is written for: read only for that check, not kept with the manual.
   const platformExtra = await getFiles(ref, branch, platformFiles(entries).filter((e) => !(e.path in files)), token).catch(() => ({}) as Record<string, string>);
   const [owner, name] = meta.fullName.split("/");
-  const analysis = analyze({ owner, repo: name }, files, presentPaths(entries), entries.map((e) => e.path), meta.language, meta.description);
+  const treePaths = entries.map((e) => e.path);
+  const analysis = workdir
+    ? analyze(
+        { owner, repo: name },
+        asRoot,
+        new Set([...presentPaths(entries), ...presentPaths(sub)]),
+        [...treePaths.filter((p) => !p.includes("/")), ...sub.map((e) => e.path)],
+        meta.language,
+        meta.description,
+        { workdir, treePaths },
+      )
+    : analyze({ owner, repo: name }, files, presentPaths(entries), treePaths, meta.language, meta.description);
 
   const readme = Object.entries(files).find(([p]) => /^readme(\.\w+)?$/i.test(p))?.[1];
   const release = parseRelease(rawRelease);
