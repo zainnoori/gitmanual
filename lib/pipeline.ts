@@ -1,6 +1,6 @@
 import { analyze, inFolder, mainSubfolder, presentPaths, selectFiles, type Analysis } from "./detect";
 import { after } from "next/server";
-import { CACHE_MS, countView, getCached, repoKey, saveRepo } from "./db";
+import { CACHE_MS, countView, readSaved, repoKey, saveRepo } from "./db";
 import { getFiles, getHeadSha, getLatestRelease, getRepoMeta, getTree, GitHubError, type RepoMeta, type RepoRef } from "./github";
 import { findDocsLink, findDownloadPage, findSetupDocs, findSetupScripts, type Guides, type SetupDoc } from "./guides";
 import { announceRepo } from "./indexnow";
@@ -34,39 +34,83 @@ function viewed(key: string) {
   }
 }
 
-// Repos analyzed in the last 12 hours come straight from the database: instant, and no GitHub calls.
+// A saved manual comes straight from the database: instant, and no GitHub calls. Once it's older than 12 hours it's
+// still shown straight away, and read again from GitHub after the page is sent (not for crawlers: a crawler walking
+// the shelf re-read hundreds of repos an hour while it waited, 2026-11-18). A saved copy from an older VERSION has
+// a different shape, so that one is read again before the page is shown.
 // gate runs only when the repo has to be read from GitHub (see lib/limit.ts); it throws to refuse.
-export async function loadRepo(ref: RepoRef, opts: { fresh?: boolean; view?: boolean; gate?: () => Promise<void> } = {}): Promise<Loaded> {
+export async function loadRepo(
+  ref: RepoRef,
+  opts: { fresh?: boolean; view?: boolean; bot?: boolean; gate?: () => Promise<void> } = {},
+): Promise<Loaded> {
   const lookup = repoKey(ref.owner, ref.repo, ref.ref);
-  const saved = await getCached(lookup);
-  const cached = saved && (saved.data as RepoData).version === VERSION ? saved : null;
-  if (cached && !opts.fresh && Date.now() - cached.analyzedAt < CACHE_MS) {
+  const saved = await readSaved(lookup);
+  const cached = saved && saved !== "error" && (saved.data as RepoData).version === VERSION ? saved : null;
+  if (cached && !opts.fresh) {
+    if (!opts.bot && Date.now() - cached.analyzedAt >= CACHE_MS) refreshLater(ref, lookup, opts.gate);
     if (opts.view) viewed(lookup);
     return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true };
   }
 
   try {
     await opts.gate?.();
-    const data = await analyzeRepo(ref);
-    // The site's own token may be able to see private repos (its owner's); those never go on the public shelf.
-    if (data.meta.private) throw new GitHubError("Repository not found (or it is private).", 404);
-    const [owner, name] = data.meta.fullName.split("/");
-    const key = repoKey(owner, name, ref.ref);
-    const { meta, analysis } = data;
-    const analyzedAt = await saveRepo(
-      key,
-      { fullName: meta.fullName, description: meta.description, stars: meta.stars, language: meta.language, difficulty: analysis.difficulty.label },
-      data,
-    );
-    // A repo new to gitmanual (main branch only; branch views aren't indexed): tell search engines about its pages.
-    if (!saved && !ref.ref) announceRepo(meta.fullName);
-    if (opts.view) viewed(key);
-    return { key, data, analyzedAt, cached: false };
+    // The database didn't answer: the page is built from GitHub, but not saved or counted, so a struggling
+    // database doesn't get a big write on top.
+    if (saved === "error") return { key: lookup, data: await readPublic(ref), analyzedAt: Date.now(), cached: false };
+    const loaded = await rebuild(ref, !saved);
+    if (opts.view) viewed(loaded.key);
+    return loaded;
   } catch (err) {
     // GitHub is down or rate-limited, or the visitor is over a limit: an older saved copy beats an error page.
     if (!cached) throw err;
     if (opts.view) viewed(lookup);
     return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, stale: true };
+  }
+}
+
+async function readPublic(ref: RepoRef): Promise<RepoData> {
+  const data = await analyzeRepo(ref);
+  // The site's own token may be able to see private repos (its owner's); those never go on the public shelf.
+  if (data.meta.private) throw new GitHubError("Repository not found (or it is private).", 404);
+  return data;
+}
+
+// Reads the repo from GitHub and saves it. isNew: it wasn't on the shelf before.
+async function rebuild(ref: RepoRef, isNew: boolean): Promise<Loaded> {
+  const data = await readPublic(ref);
+  const [owner, name] = data.meta.fullName.split("/");
+  const key = repoKey(owner, name, ref.ref);
+  const { meta, analysis } = data;
+  const analyzedAt = await saveRepo(
+    key,
+    { fullName: meta.fullName, description: meta.description, stars: meta.stars, language: meta.language, difficulty: analysis.difficulty.label },
+    data,
+  );
+  // A repo new to gitmanual (main branch only; branch views aren't indexed): tell search engines about its pages.
+  if (isNew && !ref.ref) announceRepo(meta.fullName);
+  return { key, data, analyzedAt, cached: false };
+}
+
+// Background re-reads of expired manuals: each repo once at a time, and a few at once per server, so a burst of
+// visits to old manuals doesn't turn into a burst of GitHub reads and big writes. One that's skipped is re-read on a
+// later visit.
+const refreshing = new Set<string>();
+const MAX_REFRESHING = 3;
+
+function refreshLater(ref: RepoRef, key: string, gate?: () => Promise<void>) {
+  if (refreshing.has(key) || refreshing.size >= MAX_REFRESHING) return;
+  refreshing.add(key);
+  const run = () =>
+    (async () => {
+      await gate?.();
+      await rebuild(ref, false);
+    })()
+      .catch(() => {}) // the saved copy stays; the next visit tries again
+      .finally(() => refreshing.delete(key));
+  try {
+    after(run);
+  } catch {
+    void run();
   }
 }
 

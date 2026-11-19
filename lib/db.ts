@@ -1,4 +1,4 @@
-import { createClient, type Client, type ResultSet } from "@libsql/client";
+import { createClient, type Client } from "@libsql/client";
 import { FACETS_VERSION, facetsOf } from "./facets";
 
 // Turso in production (TURSO_DATABASE_URL + TURSO_AUTH_TOKEN); a local SQLite file in development.
@@ -180,7 +180,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 6; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars
+const SCHEMA_VERSION = 7; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -262,6 +262,11 @@ function db(): Promise<Client | null> {
         CREATE INDEX IF NOT EXISTS chat_conversations_expires ON chat_conversations (expires_at);
         DROP INDEX IF EXISTS repos_stars; -- repos_shelf starts with stars, so this one only cost writes
       `);
+      // The Finds list without the images: synced_at and video_id sit after the image in each row, so reading the list
+      // from the table read every image (~20 MB, 3.5 s on average, once per manual view on 2026-11-18).
+      await client.execute(
+        "CREATE INDEX IF NOT EXISTS fb_posts_list ON fb_posts (created_at, id, repo, kind, caption, permalink, synced_at, video_id)",
+      );
       // Fresh statistics for the query planner, so it picks the right index (it chose the key's index over
       // repos_shelf on 2026-11-17). Only analyzes what needs it.
       await client.execute("PRAGMA optimize").catch(() => {});
@@ -339,16 +344,28 @@ export async function saveConversation(id: string, messages: unknown[], answers:
   );
 }
 
-// The database is a cache and a counter: if it fails, the request should still succeed.
-async function safely<T>(fallback: T, fn: (c: Client) => Promise<T>): Promise<T> {
+// How long a page waits for the database before going on without it. The request itself keeps going until
+// DB_TIMEOUT_MS (a write still lands), but a busy database costs a visitor seconds, not the minute it used to
+// (2026-11-18: five 15-second waits in a row hit Vercel's 60-second limit).
+const PAGE_WAIT_MS = 5_000;
+
+// The database is a cache and a counter: if it fails or is slow, the request should still succeed.
+async function safely<T>(fallback: T, fn: (c: Client) => Promise<T>, waitMs = PAGE_WAIT_MS): Promise<T> {
   const c = await db();
   if (!c) return fallback;
-  try {
-    return await fn(c);
-  } catch (e) {
+  const run = fn(c).catch((e) => {
     console.error("gitmanual db:", e);
     return fallback;
-  }
+  });
+  if (!Number.isFinite(waitMs)) return run;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => {
+    timer = setTimeout(() => {
+      console.error(`gitmanual db: no answer in ${waitMs / 1000} s, went on without it`);
+      resolve(fallback);
+    }, waitMs);
+  });
+  return Promise.race([run, late]).finally(() => clearTimeout(timer));
 }
 
 export function repoKey(owner: string, repo: string, ref?: string): string {
@@ -360,8 +377,15 @@ export function hasRepo(key: string): Promise<boolean> {
   return safely(false, async (c) => (await c.execute({ sql: "SELECT 1 FROM repos WHERE key = ?", args: [key] })).rows.length > 0);
 }
 
-export function getCached(key: string): Promise<{ data: unknown; analyzedAt: number } | null> {
-  return safely(null, async (c) => {
+export async function getCached(key: string): Promise<{ data: unknown; analyzedAt: number } | null> {
+  const saved = await readSaved(key);
+  return saved === "error" ? null : saved;
+}
+
+// The saved manual, or "error" when the database didn't answer: loadRepo then builds the page without saving it,
+// instead of adding a big write to a database that's already struggling.
+export function readSaved(key: string): Promise<{ data: unknown; analyzedAt: number } | null | "error"> {
+  return safely<{ data: unknown; analyzedAt: number } | null | "error">("error", async (c) => {
     const { rows } = await c.execute({ sql: "SELECT data, analyzed_at FROM repos WHERE key = ?", args: [key] });
     return rows[0] ? { data: JSON.parse(String(rows[0].data)), analyzedAt: Number(rows[0].analyzed_at) } : null;
   });
@@ -373,18 +397,23 @@ export async function saveRepo(
   data: unknown,
 ): Promise<number> {
   const now = Date.now();
+  // One round trip: the save and dropping the AI guides it outdates (a new analysis may change the steps).
   await safely(null, (c) =>
-    c.execute({
-      sql: `INSERT INTO repos (key, full_name, description, stars, language, difficulty, data, analyzed_at, views, last_viewed, facets)
+    c.batch(
+      [
+        {
+          sql: `INSERT INTO repos (key, full_name, description, stars, language, difficulty, data, analyzed_at, views, last_viewed, facets)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
             ON CONFLICT(key) DO UPDATE SET full_name = excluded.full_name, description = excluded.description,
               stars = excluded.stars, language = excluded.language, difficulty = excluded.difficulty,
               data = excluded.data, analyzed_at = excluded.analyzed_at, facets = excluded.facets`,
-      args: [key, r.fullName, r.description, r.stars, r.language, r.difficulty, JSON.stringify(data), now, now, facetsOf(data as Parameters<typeof facetsOf>[0])],
-    }),
+          args: [key, r.fullName, r.description, r.stars, r.language, r.difficulty, JSON.stringify(data), now, now, facetsOf(data as Parameters<typeof facetsOf>[0])],
+        },
+        { sql: "DELETE FROM guides WHERE key = ?", args: [key] },
+      ],
+      "write",
+    ),
   );
-  // A new analysis may change the steps, so older AI guides no longer match.
-  await safely(null, (c) => c.execute({ sql: "DELETE FROM guides WHERE key = ?", args: [key] }));
   return now;
 }
 
@@ -513,7 +542,7 @@ export function ensureFacets(maxRows = 400): Promise<number> {
       done += keys.length;
     }
     return done;
-  }).finally(() => (facetsRun = null));
+  }, Infinity).finally(() => (facetsRun = null));
   return facetsRun;
 }
 
@@ -545,27 +574,70 @@ export function facetRepos(q: { all: string[]; any?: string[]; difficulty?: stri
 
 export type Alternative = { fullName: string; description: string | null; stars: number };
 
-// Every repo's facets, kept in memory for an hour: suggestions run on every manual view, and this is a small table
-// (name, stars and a short string per repo) compared with querying per topic each time.
-type FacetRow = { key: string; fullName: string; description: string | null; stars: number; facets: string };
-let facetCache: { at: number; rows: FacetRow[]; df: Map<string, number> } | null = null;
+// The small facts of every repo on the shelf (all read from repos_shelf, never the manuals), kept in memory: the
+// suggestions on every manual view, the homepage counts and the shelf's counts are worked out from it instead of
+// counting the shelf in the database each time (those counts took 30–60 s each on a busy 2026-11-18).
+type FacetRow = {
+  key: string;
+  fullName: string;
+  description: string | null;
+  stars: number;
+  language: string | null;
+  difficulty: string;
+  risingAt: number | null;
+  facets: string;
+};
+type FacetIndex = { at: number; rows: FacetRow[]; df: Map<string, number> };
+const FACET_INDEX_MS = 10 * 60e3;
+let facetCache: FacetIndex | null = null;
+let facetLoad: Promise<FacetIndex | null> | null = null;
 
-async function facetIndex() {
-  if (facetCache && Date.now() - facetCache.at < 3600e3) return facetCache;
-  const rows = await safely([] as FacetRow[], async (c) => {
-    const { rows } = await c.execute("SELECT key, full_name, description, stars, facets FROM repos WHERE key NOT LIKE '%@%' AND facets IS NOT NULL");
-    return rows.map((r) => ({ key: String(r.key), fullName: String(r.full_name), description: r.description == null ? null : String(r.description), stars: Number(r.stars), facets: String(r.facets) }));
-  });
-  // How many repos share each topic: rare topics ("fediverse") say much more about a repo than common ones ("ai").
-  const df = new Map<string, number>();
-  for (const r of rows) for (const t of r.facets.split(" ")) if (t.startsWith("t:")) df.set(t, (df.get(t) ?? 0) + 1);
-  facetCache = { at: Date.now(), rows, df };
-  return facetCache;
+// One read at a time per server. A failed read keeps the last good copy (it used to keep an empty one for an hour,
+// which hid every suggestion), and the next call tries again.
+function loadFacetIndex(): Promise<FacetIndex | null> {
+  facetLoad ??= safely<FacetIndex | null>(
+    null,
+    async (c) => {
+      const { rows } = await c.execute("SELECT key, full_name, description, stars, language, difficulty, rising_at, facets FROM repos WHERE key NOT LIKE '%@%'");
+      const list: FacetRow[] = rows.map((r) => ({
+        key: String(r.key),
+        fullName: String(r.full_name),
+        description: r.description == null ? null : String(r.description),
+        stars: Number(r.stars),
+        language: r.language == null ? null : String(r.language),
+        difficulty: String(r.difficulty),
+        risingAt: r.rising_at == null ? null : Number(r.rising_at),
+        facets: r.facets == null ? "" : String(r.facets),
+      }));
+      // How many repos share each topic: rare topics ("fediverse") say much more about a repo than common ones ("ai").
+      const df = new Map<string, number>();
+      for (const r of list) for (const t of r.facets.split(" ")) if (t.startsWith("t:")) df.set(t, (df.get(t) ?? 0) + 1);
+      return { at: Date.now(), rows: list, df };
+    },
+    Infinity,
+  )
+    .then((index) => (index ? (facetCache = index) : null))
+    .finally(() => (facetLoad = null));
+  return facetLoad;
+}
+
+// The index, or null when there's none yet and the first read takes longer than a page waits. An older copy is
+// used straight away while a newer one is read in the background.
+async function facetIndex(): Promise<FacetIndex | null> {
+  if (facetCache) {
+    if (Date.now() - facetCache.at > FACET_INDEX_MS) void loadFacetIndex();
+    return facetCache;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), PAGE_WAIT_MS)));
+  return Promise.race([loadFacetIndex(), late]).finally(() => clearTimeout(timer));
 }
 
 // How many repos match each facets query (same rules as facetRepos), from the in-memory index: cheap enough for the homepage.
 export async function facetCounts(queries: { all: string[]; any?: string[] }[]): Promise<number[]> {
-  const { rows } = await facetIndex();
+  const index = await facetIndex();
+  if (!index) return queries.map(() => 0);
+  const { rows } = index;
   const has = (r: FacetRow, t: string) => r.facets.includes(` ${t} `);
   return queries.map((q) => rows.filter((r) => q.all.every((t) => has(r, t)) && (!q.any?.length || q.any.some((t) => has(r, t)))).length);
 }
@@ -574,8 +646,9 @@ export async function facetCounts(queries: { all: string[]; any?: string[] }[]):
 // Only fairly close matches count, so a repo with nothing similar on the shelf gets no suggestions.
 export async function alternativesFor(key: string, os: string, topics: string[], limit = 3): Promise<Alternative[]> {
   if (!topics.length) return [];
-  const { rows, df } = await facetIndex();
-  if (!rows.length) return [];
+  const index = await facetIndex();
+  if (!index?.rows.length) return [];
+  const { rows, df } = index;
   const weight = (t: string) => Math.log(rows.length / (df.get(t) ?? 1));
   const minScore = 2 * Math.log(20); // about two topics that fewer than 1 in 20 repos share
   return rows
@@ -663,7 +736,7 @@ export function browseRepos(
     const filter = where.join(" AND ");
     const page = Math.max(1, query.page ?? 1);
     const perPage = query.perPage ?? SHELF_PAGE;
-    const [rows, count, totals] = await Promise.all([
+    const [rows, total, totals] = await Promise.all([
       c.execute({
         sql: `SELECT r.full_name, r.description, r.stars, r.language, r.difficulty, r.views, r.analyzed_at, r.rising_at,
                      r.worked, r.stuck
@@ -673,10 +746,11 @@ export function browseRepos(
               LIMIT ? OFFSET ?`,
         args: [...args, perPage, (page - 1) * perPage],
       }),
-      c.execute({ sql: `SELECT COUNT(*) AS n FROM repos r WHERE ${filter}`, args }),
+      shelfMatches(query, weekAgo).then(
+        async (n) => n ?? Number((await c.execute({ sql: `SELECT COUNT(*) AS n FROM repos r WHERE ${filter}`, args })).rows[0]?.n ?? 0),
+      ),
       shelfTotals(c, weekAgo),
     ]);
-    const { langs, rising } = totals;
     return {
       repos: rows.rows.map((r) => ({
         fullName: String(r.full_name),
@@ -690,37 +764,63 @@ export function browseRepos(
         analyzedAt: Number(r.analyzed_at),
         risingAt: r.rising_at == null ? null : Number(r.rising_at),
       })),
-      total: Number(count.rows[0]?.n ?? 0),
-      languages: langs.rows.map((r) => ({ name: String(r.language), count: Number(r.n) })),
-      all: Number(rising.rows[0]?.n ?? 0),
-      rising: Number(rising.rows[0]?.rising ?? 0),
+      total,
+      ...totals,
     };
   });
+}
+
+// How many repos match a shelf query, from the in-memory index (same rules as browseRepos' WHERE); null without one.
+async function shelfMatches(query: ShelfQuery, weekAgo: number): Promise<number | null> {
+  const index = await facetIndex();
+  if (!index) return null;
+  const q = query.q?.toLowerCase();
+  const tokens = [query.topic && `t:${query.topic}`, query.os && `os:${query.os}`].filter(Boolean).map((t) => ` ${String(t).toLowerCase()} `);
+  return index.rows.filter(
+    (r) =>
+      (!q || r.fullName.toLowerCase().includes(q) || Boolean(r.description?.toLowerCase().includes(q))) &&
+      (!query.language || r.language === query.language) &&
+      (!query.difficulty || r.difficulty === query.difficulty) &&
+      (!query.minStars || r.stars >= query.minStars) &&
+      (!query.rising || (r.risingAt != null && r.risingAt > weekAgo)) &&
+      tokens.every((t) => r.facets.toLowerCase().includes(t)),
+  ).length;
 }
 
 // Just the shelf's header numbers (the language filter, All / Rising), so the page can show them and its filters
 // while the repos themselves are still being read.
 export function shelfCounts(): Promise<{ languages: { name: string; count: number }[]; all: number; rising: number }> {
-  return safely({ languages: [], all: 0, rising: 0 }, async (c) => {
-    const { langs, rising } = await shelfTotals(c, Date.now() - 7 * 864e5);
-    return {
-      languages: langs.rows.map((r) => ({ name: String(r.language), count: Number(r.n) })),
-      all: Number(rising.rows[0]?.n ?? 0),
-      rising: Number(rising.rows[0]?.rising ?? 0),
-    };
-  });
+  return safely({ languages: [], all: 0, rising: 0 }, (c) => shelfTotals(c, Date.now() - 7 * 864e5));
 }
 
-// The language filter and the All / Rising counts are the same for every visitor: kept in memory for 5 minutes
-// instead of counting the whole shelf on each shelf view.
-let totalsCache: { at: number; value: Promise<{ langs: ResultSet; rising: ResultSet }> } | null = null;
-function shelfTotals(c: Client, weekAgo: number) {
+type ShelfTotals = { languages: { name: string; count: number }[]; all: number; rising: number };
+
+// The language filter and the All / Rising counts are the same for every visitor: worked out from the in-memory
+// index, or, until there is one, counted in the database and kept for 5 minutes.
+let totalsCache: { at: number; value: Promise<ShelfTotals> } | null = null;
+async function shelfTotals(c: Client, weekAgo: number): Promise<ShelfTotals> {
+  const index = await facetIndex();
+  if (index) {
+    const langs = new Map<string, number>();
+    for (const r of index.rows) if (r.language != null) langs.set(r.language, (langs.get(r.language) ?? 0) + 1);
+    return {
+      languages: [...langs]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+      all: index.rows.length,
+      rising: index.rows.filter((r) => r.risingAt != null && r.risingAt > weekAgo).length,
+    };
+  }
   if (totalsCache && Date.now() - totalsCache.at < 300e3) return totalsCache.value;
   const value = Promise.all([
     c.execute("SELECT language, COUNT(*) AS n FROM repos WHERE key NOT LIKE '%@%' AND language IS NOT NULL GROUP BY language ORDER BY n DESC, language"),
     // The whole shelf and this week's rising repos, for the All / Rising switch.
     c.execute({ sql: "SELECT COUNT(*) AS n, COALESCE(SUM(rising_at > ?), 0) AS rising FROM repos WHERE key NOT LIKE '%@%'", args: [weekAgo] }),
-  ]).then(([langs, rising]) => ({ langs, rising }));
+  ]).then(([langs, rising]) => ({
+    languages: langs.rows.map((r) => ({ name: String(r.language), count: Number(r.n) })),
+    all: Number(rising.rows[0]?.n ?? 0),
+    rising: Number(rising.rows[0]?.rising ?? 0),
+  }));
   totalsCache = { at: Date.now(), value };
   value.catch(() => (totalsCache = null)); // a failed count is asked again next time
   return value;
@@ -755,6 +855,7 @@ export function fbKnownIds(): Promise<Set<string>> {
 }
 
 export function saveFbPost(p: FbPost, image: { bytes: Uint8Array; type: string } | null): Promise<unknown> {
+  fbCache = null;
   return safely(null, (c) =>
     c.execute({
       sql: `INSERT INTO fb_posts (id, repo, kind, caption, permalink, created_at, image, image_type, synced_at, video_id)
@@ -767,8 +868,20 @@ export function saveFbPost(p: FbPost, image: { bytes: Uint8Array; type: string }
   );
 }
 
+// Read for every manual (does this repo have a Finds post?), so kept in memory for 5 minutes; a sync clears it.
+let fbCache: { at: number; posts: Promise<FbPost[]> } | null = null;
 export function listFbPosts(): Promise<FbPost[]> {
-  return safely([], async (c) =>
+  if (fbCache && Date.now() - fbCache.at < 300e3) return fbCache.posts;
+  const posts = readFbPosts().then((list) => {
+    if (!list) fbCache = null; // didn't answer: asked again next time
+    return list ?? [];
+  });
+  fbCache = { at: Date.now(), posts };
+  return posts;
+}
+
+function readFbPosts(): Promise<FbPost[] | null> {
+  return safely<FbPost[] | null>(null, async (c) =>
     (await c.execute("SELECT id, repo, kind, caption, permalink, created_at, synced_at, video_id FROM fb_posts ORDER BY created_at DESC LIMIT 500")).rows.map((r) => ({
       id: String(r.id),
       repo: String(r.repo),

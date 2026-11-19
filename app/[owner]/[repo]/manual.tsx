@@ -45,7 +45,8 @@ const getRepo = cache(async (owner: string, repo: string, ref?: string): Promise
   const key = repoKey(owner, name, ref);
   const votes = getVotes(key);
   try {
-    const l = await loadRepo({ owner, repo: name, ref }, { view: !BOTS.test(ua), gate: analyzeGate(h) });
+    const bot = BOTS.test(ua);
+    const l = await loadRepo({ owner, repo: name, ref }, { view: !bot, bot, gate: analyzeGate(h) });
     return { data: { ...l.data, analyzedAt: l.analyzedAt, cached: l.cached, stale: l.stale, votes: await (l.key === key ? votes : getVotes(l.key)) } as ReportData };
   } catch (e) {
     return e instanceof GitHubError ? { error: e.message, status: e.status } : { error: "Failed to analyze repository.", status: 500 };

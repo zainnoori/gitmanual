@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCached, hasRepo, markRising, repoKey } from "@/lib/db";
+import { hasRepo, markRising, repoKey } from "@/lib/db";
 import { risingRepos, topicRepos } from "@/lib/github";
 import { SEED_THEMES } from "@/lib/lists";
 import { loadRepo } from "@/lib/pipeline";
@@ -45,7 +45,7 @@ export async function GET(req: Request) {
     if (added.length >= PER_RUN || !timeLeft()) break;
     const [owner, repo] = full.split("/");
     // Already on the shelf: it's still rising, so it counts for "Rising this week" too.
-    if (await getCached(repoKey(owner, repo))) {
+    if (await hasRepo(repoKey(owner, repo))) {
       knownCount++;
       await markRising(repoKey(owner, repo));
       continue;
