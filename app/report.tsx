@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, use, useEffect, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { Analysis } from "@/lib/detect";
 import type { Guides } from "@/lib/guides";
@@ -167,15 +167,12 @@ export function ReportView({
   chat = false,
   inspection = false,
   osPage = null,
-  alternatives = {},
-  related = {},
+  suggestions,
 }: {
   // The "Deep Inspection" card (Pro) only shows when Pro is on for this site.
   inspection?: boolean;
-  // Similar repos that run on the systems this one doesn't (see manual.tsx).
-  alternatives?: Partial<Record<OS, Alternative[]>>;
-  // Similar repos that run on each system, shown on every manual (see manual.tsx).
-  related?: Partial<Record<OS, Alternative[]>>;
+  // Similar repos (see manual.tsx), streamed in after the manual. None for private repos.
+  suggestions?: Promise<Suggestions>;
   // Set on /owner/repo/windows etc.: that system is the page's subject, so it isn't swapped for the visitor's.
   osPage?: OS | null;
   picks?: Pick[];
@@ -378,8 +375,7 @@ export function ReportView({
       // Chat always reads the default branch, so it isn't offered on a branch's page.
       chat={chat && !gitRef}
       osPage={Boolean(osPage)}
-      alternatives={alternatives}
-      related={related}
+      suggestions={suggestions}
       onRefresh={() => setRefresh((n) => n + 1)}
       onDisconnect={async () => {
         await disconnect();
@@ -414,12 +410,10 @@ function Report({
   chat,
   inspection,
   osPage,
-  alternatives,
-  related,
+  suggestions,
 }: {
   inspection: boolean;
-  alternatives: Partial<Record<OS, Alternative[]>>;
-  related: Partial<Record<OS, Alternative[]>>;
+  suggestions?: Promise<Suggestions>;
   picks: Pick[];
   curator: string;
   aiGuide: boolean;
@@ -449,9 +443,6 @@ function Report({
   const fit = fitCheck(a, install, os, myArch, meta.archived);
   // Made for another system (lib/platform.ts): the page points there instead of at a build that can't work here.
   const madeFor = install.only?.sure && install.only.os !== os ? install.only.os : null;
-  // "More like this" leaves out what the alternatives box above already shows.
-  const altsShown = fit.status !== "yes" ? (alternatives[os] ?? []).map((r) => r.fullName) : [];
-  const moreLike = (related[os] ?? []).filter((r) => !altsShown.includes(r.fullName));
   // The route diagram ("How it fits together", app/flow.tsx) is off the page for now: it made the page heavier
   // than the three answers people come for. Its Mermaid still goes out with the API, Markdown and MCP.
   // const flow = setupFlow(a, install, os);
@@ -623,13 +614,10 @@ function Report({
         </div>
       </section>
 
-      {fit.status !== "yes" && (alternatives[os]?.length ?? 0) > 0 && (
-        <aside className="alts" aria-labelledby="alts-h">
-          <h3 id="alts-h">
-            {fit.status === "no" ? `Doesn't run on ${OS_LABEL[os]}? These similar projects do.` : `Prefer one that's sure to run on ${OS_LABEL[os]}? These similar projects do.`}
-          </h3>
-          <AltCards list={alternatives[os]!} os={os} />
-        </aside>
+      {fit.status !== "yes" && suggestions && (
+        <Suspense fallback={null}>
+          <Alts suggestions={suggestions} os={os} sure={fit.status !== "no"} />
+        </Suspense>
       )}
 
       <StartHere
@@ -815,7 +803,11 @@ function Report({
           )}
           {(!aiGuide || priv) && <AskAi prompt={askPrompt(result, os, myArch)} os={os} />}
 
-          <Related list={moreLike} name={meta.fullName.split("/")[1]} os={os} />
+          {suggestions && (
+            <Suspense fallback={null}>
+              <Related suggestions={suggestions} name={meta.fullName.split("/")[1]} os={os} hideAlts={fit.status !== "yes"} />
+            </Suspense>
+          )}
         </div>
 
         <aside className="sheet-side">
@@ -1935,8 +1927,27 @@ function AltCards({ list, os }: { list: Alternative[]; os: OS }) {
   );
 }
 
+// Similar repos for each system, from the server (manual.tsx): ones that run where this repo doesn't, and "More like this".
+export type Suggestions = { alternatives: Partial<Record<OS, Alternative[]>>; related: Partial<Record<OS, Alternative[]>> };
+
+// Under the system picker when this repo doesn't clearly run on the chosen system.
+function Alts({ suggestions, os, sure }: { suggestions: Promise<Suggestions>; os: OS; sure: boolean }) {
+  const list = use(suggestions).alternatives[os] ?? [];
+  if (!list.length) return null;
+  return (
+    <aside className="alts" aria-labelledby="alts-h">
+      <h3 id="alts-h">{sure ? `Prefer one that's sure to run on ${OS_LABEL[os]}? These similar projects do.` : `Doesn't run on ${OS_LABEL[os]}? These similar projects do.`}</h3>
+      <AltCards list={list} os={os} />
+    </aside>
+  );
+}
+
 // "More like ollama that run on macOS": the end of every manual, so there's always somewhere to go next.
-function Related({ list, name, os }: { list: Alternative[]; name: string; os: OS }) {
+// It leaves out what the alternatives box above already shows.
+function Related({ suggestions, name, os, hideAlts }: { suggestions: Promise<Suggestions>; name: string; os: OS; hideAlts: boolean }) {
+  const s = use(suggestions);
+  const shown = hideAlts ? (s.alternatives[os] ?? []).map((r) => r.fullName) : [];
+  const list = (s.related[os] ?? []).filter((r) => !shown.includes(r.fullName));
   if (!list.length) return null;
   return (
     <section className="alts related" aria-labelledby="related-h">

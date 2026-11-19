@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { notFound, permanentRedirect } from "next/navigation";
 import { PRO_ENABLED } from "@/lib/stripe";
 import { cache } from "react";
-import { alternativesFor, getVotes, type Alternative } from "@/lib/db";
+import { alternativesFor, getVotes, repoKey, type Alternative } from "@/lib/db";
 import { answered, asked, beforeYouStart } from "@/lib/facts";
 import { facetsOf, hasDownload, topicsOf } from "@/lib/facets";
 import { GitHubError } from "@/lib/github";
@@ -13,7 +13,7 @@ import { PICKS, picksFor } from "@/lib/picks";
 import { analyzeGate } from "@/lib/limit";
 import { loadRepo } from "@/lib/pipeline";
 import { githubApp } from "@/lib/session";
-import { ReportView, type ReportData, type Mode } from "../../report";
+import { ReportView, type ReportData, type Mode, type Suggestions } from "../../report";
 
 // Shared by the repo's manual (/owner/repo) and its per-system pages (/owner/repo/windows).
 export type Props = {
@@ -39,9 +39,14 @@ const BOTS = /bot|crawl|spider|slurp|preview|facebookexternalhit|embedly|quora|w
 const getRepo = cache(async (owner: string, repo: string, ref?: string): Promise<{ data: ReportData } | { error: string; status: number }> => {
   const h = await headers();
   const ua = h.get("user-agent") ?? "";
+  const name = repo.replace(/\.git$/, "");
+  // The votes are read alongside the manual, not after it: one round trip to the database instead of two.
+  // (Under another spelling or a new name the key differs, and they're read again for the real one.)
+  const key = repoKey(owner, name, ref);
+  const votes = getVotes(key);
   try {
-    const l = await loadRepo({ owner, repo: repo.replace(/\.git$/, ""), ref }, { view: !BOTS.test(ua), gate: analyzeGate(h) });
-    return { data: { ...l.data, analyzedAt: l.analyzedAt, cached: l.cached, stale: l.stale, votes: await getVotes(l.key) } as ReportData };
+    const l = await loadRepo({ owner, repo: name, ref }, { view: !BOTS.test(ua), gate: analyzeGate(h) });
+    return { data: { ...l.data, analyzedAt: l.analyzedAt, cached: l.cached, stale: l.stale, votes: await (l.key === key ? votes : getVotes(l.key)) } as ReportData };
   } catch (e) {
     return e instanceof GitHubError ? { error: e.message, status: e.status } : { error: "Failed to analyze repository.", status: 500 };
   }
@@ -120,6 +125,8 @@ export async function RepoManual({ params, searchParams }: Props) {
   realOwner(owner);
   const osPage = await osPageOf(params);
   const { ref, os, mode } = await searchParams;
+  // Started with the manual rather than after it (it's another database read); a renamed repo is redirected below.
+  const picks = picksFor(`${owner}/${repo.replace(/\.git$/, "")}`).catch(() => []);
   const r = await getRepo(owner, repo, ref);
 
   // One URL per repo: send renamed repos and other spellings (case, .git) to the canonical name.
@@ -145,16 +152,22 @@ export async function RepoManual({ params, searchParams }: Props) {
         initialOs={initialOs}
         osPage={osPage}
         initialMode={initialMode}
-        picks={"data" in r ? await picksFor(r.data.meta.fullName) : []}
+        picks={"data" in r ? await picks : []}
         curator={PICKS.curator}
         aiGuide={Boolean(process.env.ANTHROPIC_API_KEY)}
         chat={process.env.CHAT_ENABLED === "on" && Boolean(process.env.ANTHROPIC_API_KEY)}
         inspection={PRO_ENABLED()}
-        alternatives={"data" in r ? await alternatives(r.data) : {}}
-        related={"data" in r ? await related(r.data) : {}}
+        // Not awaited: the manual goes out without waiting for these, and they stream in when ready.
+        suggestions={"data" in r ? suggestions(r.data) : undefined}
       />
     </>
   );
+}
+
+// The similar-repo boxes. On a fresh server instance the first one reads every repo's tags, which can take a moment.
+async function suggestions(d: ReportData): Promise<Suggestions> {
+  const [alts, more] = await Promise.all([alternatives(d), related(d)]);
+  return { alternatives: alts, related: more };
 }
 
 // For each system this repo doesn't clearly run on, a few similar repos (by shared topics) that do.
