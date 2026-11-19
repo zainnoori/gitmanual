@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { browseRepos, SHELF_PAGE, type ShelfQuery } from "@/lib/db";
+import { Suspense } from "react";
+import { browseRepos, SHELF_PAGE, shelfCounts, type ShelfQuery } from "@/lib/db";
 import { ShelfCard } from "../cards";
 import { CarbonAd } from "../carbon";
 import { ShelfFilters } from "./filters";
@@ -42,13 +43,10 @@ function parse(p: Params): ShelfQuery {
 export default async function ShelfPage({ searchParams }: { searchParams: Promise<Params> }) {
   const params = await searchParams;
   const query = parse(params);
-  const { repos, total, languages, all, rising } = await browseRepos(query);
-  const pages = Math.max(1, Math.ceil(total / SHELF_PAGE));
-  const pageHref = (n: number) => {
-    const next = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => Boolean(e[1])));
-    next.set("page", String(n));
-    return `/shelf?${next}`;
-  };
+  // The header and filters come first (their numbers are cached for 5 minutes); the repos stream in behind them,
+  // with outlined cards in their place. Keyed by the query, so every filter, sort or page change shows the cards
+  // again while the search box keeps its focus.
+  const { languages, all, rising } = await shelfCounts();
   const filtered = Boolean(query.q || query.topic || query.language || query.difficulty || query.minStars || query.rising);
   // The All / Rising switch keeps the other filters and starts again at page 1.
   const viewHref = (risingOnly: boolean) => {
@@ -86,6 +84,46 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
 
       <ShelfFilters query={query} languages={languages} />
 
+      <Suspense key={JSON.stringify(query)} fallback={<ShelfGhosts />}>
+        <ShelfResults query={query} params={params} filtered={filtered} />
+      </Suspense>
+    </div>
+  );
+}
+
+// Outlined cards in the shelf's grid while its repos are read, so nothing jumps when they arrive.
+function ShelfGhosts() {
+  return (
+    <>
+      <p className="shelf-count" role="status">
+        Taking repos off the shelf…
+      </p>
+      <ul className="shelf-grid" aria-hidden="true">
+        {Array.from({ length: 6 }, (_, i) => (
+          <li key={i}>
+            <div className="shelf-card shelf-ghost">
+              <i />
+              <i />
+              <i />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+
+async function ShelfResults({ query, params, filtered }: { query: ShelfQuery; params: Params; filtered: boolean }) {
+  const { repos, total } = await browseRepos(query);
+  const pages = Math.max(1, Math.ceil(total / SHELF_PAGE));
+  const pageHref = (n: number) => {
+    const next = new URLSearchParams(Object.entries(params).filter((e): e is [string, string] => Boolean(e[1])));
+    next.set("page", String(n));
+    return `/shelf?${next}`;
+  };
+
+  return (
+    <>
       <p className="shelf-count" aria-live="polite">
         {total.toLocaleString()} {total === 1 ? "repo" : "repos"}
         {query.topic && <> tagged <b>#{query.topic}</b></>}
@@ -140,6 +178,6 @@ export default async function ShelfPage({ searchParams }: { searchParams: Promis
           )}
         </nav>
       )}
-    </div>
+    </>
   );
 }

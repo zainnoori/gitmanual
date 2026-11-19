@@ -784,6 +784,12 @@ code.flow-label { font: 600 var(--fs-meta)/1.4 var(--mono); background: none; bo
 }
 .shelf-card:hover { transform: translate(-3px, -3px); box-shadow: 7px 7px 0 var(--wrench); }
 .shelf-card:focus-visible { outline-offset: 4px; }
+/* The shelf's ShelfGhosts (app/shelf/page.tsx): outlined cards with shimmering lines (owner, name, description) until the repos arrive. */
+.shelf-ghost { min-height: 196px; gap: 12px; border-color: var(--line-strong); box-shadow: 4px 4px 0 var(--line); }
+.shelf-ghost:hover { transform: none; box-shadow: 4px 4px 0 var(--line); }
+.shelf-ghost i { display: block; height: 12px; width: 40%; border-radius: 6px; background: linear-gradient(90deg, var(--line) 0%, var(--paper) 50%, var(--line) 100%); background-size: 200% 100%; animation: insp-shimmer 1.4s linear infinite; }
+.shelf-ghost i:nth-child(2) { height: 26px; width: 70%; }
+.shelf-ghost i:nth-child(3) { height: 44px; width: 100%; margin-top: 4px; }
 .shelf-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .shelf-owner { font: 500 var(--fs-meta) var(--mono); color: var(--pencil); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shelf-stars { flex: none; font: 800 var(--fs-title) var(--display); }

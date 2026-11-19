@@ -698,6 +698,19 @@ export function browseRepos(
   });
 }
 
+// Just the shelf's header numbers (the language filter, All / Rising), so the page can show them and its filters
+// while the repos themselves are still being read.
+export function shelfCounts(): Promise<{ languages: { name: string; count: number }[]; all: number; rising: number }> {
+  return safely({ languages: [], all: 0, rising: 0 }, async (c) => {
+    const { langs, rising } = await shelfTotals(c, Date.now() - 7 * 864e5);
+    return {
+      languages: langs.rows.map((r) => ({ name: String(r.language), count: Number(r.n) })),
+      all: Number(rising.rows[0]?.n ?? 0),
+      rising: Number(rising.rows[0]?.rising ?? 0),
+    };
+  });
+}
+
 // The language filter and the All / Rising counts are the same for every visitor: kept in memory for 5 minutes
 // instead of counting the whole shelf on each shelf view.
 let totalsCache: { at: number; value: Promise<{ langs: ResultSet; rising: ResultSet }> } | null = null;
