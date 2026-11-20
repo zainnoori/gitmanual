@@ -42,7 +42,7 @@ export function UsersAdmin() {
       <p>
         <strong>{users.length.toLocaleString()}</strong> {users.length === 1 ? "user" : "users"}: {newThisWeek} new and {activeThisWeek} active in
         the last 7 days; {pro} on Pro. Answers and repos are from the last 14 days. <a href="/admin/chat">Chat stats</a> ·{" "}
-        <a href="/admin/keys">API keys</a>
+        <a href="/admin/keys">API keys</a> · <a href="/admin/purchases">Purchases</a>
       </p>
       <p>
         <input

@@ -1109,6 +1109,36 @@ export async function hasPurchase(githubId: number, repo: string): Promise<boole
   });
 }
 
+// For /admin/purchases: every one-time purchase and every Pro subscription, newest first, with the buyer's GitHub
+// username. Throws when the database doesn't answer, so the page says so instead of showing "no purchases".
+export type AdminPurchase = Purchase & { login: string | null };
+export type AdminSubscription = SubscriptionRow & { login: string | null; updatedAt: number };
+export async function listPayments(limit = 1000): Promise<{ purchases: AdminPurchase[]; subscriptions: AdminSubscription[] }> {
+  return strictly(async (c) => {
+    const [purchases, subscriptions] = await Promise.all([
+      c.execute({
+        sql: "SELECT p.*, u.login FROM purchases p LEFT JOIN users u ON u.github_id = p.github_id ORDER BY p.paid_at DESC LIMIT ?",
+        args: [limit],
+      }),
+      c.execute("SELECT s.*, u.login FROM subscriptions s LEFT JOIN users u ON u.github_id = s.github_id ORDER BY s.updated_at DESC"),
+    ]);
+    const login = (r: Record<string, unknown>) => (r.login == null ? null : String(r.login));
+    return {
+      purchases: purchases.rows.map((r) => ({
+        session: String(r.session),
+        githubId: Number(r.github_id),
+        repo: String(r.repo),
+        fullName: String(r.full_name),
+        amount: Number(r.amount),
+        currency: String(r.currency),
+        paidAt: Number(r.paid_at),
+        login: login(r),
+      })),
+      subscriptions: subscriptions.rows.map((r) => ({ ...toSubscription(r), login: login(r), updatedAt: Number(r.updated_at) })),
+    };
+  });
+}
+
 export async function purchasesFor(githubId: number): Promise<Purchase[]> {
   return strictly(async (c) => {
     const { rows } = await c.execute({ sql: "SELECT * FROM purchases WHERE github_id = ? ORDER BY paid_at DESC", args: [githubId] });

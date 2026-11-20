@@ -40,7 +40,7 @@ export function ChatAdmin() {
       <p>
         Last 14 days: <strong>{total.answers.toLocaleString()}</strong> answers, <strong>{usd(total.spent)}</strong> spent. Limits:{" "}
         {answersPerDay} answers a day per person, {usd(dailyUsd)} a day for the site. Days are UTC. <a href="/admin/users">Users</a> ·{" "}
-        <a href="/admin/keys">API keys</a> · <a href="/admin/problems">Inbox</a>
+        <a href="/admin/keys">API keys</a> · <a href="/admin/purchases">Purchases</a> · <a href="/admin/problems">Inbox</a>
       </p>
       <p>
         Open now: <strong>{stats.live.chats}</strong> {stats.live.chats === 1 ? "chat" : "chats"}
