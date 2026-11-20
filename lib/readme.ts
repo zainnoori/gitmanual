@@ -137,6 +137,8 @@ const TOOLS: Tool[] = [
   },
 ];
 
+export const toolNamed = (name: string): Tool | undefined => TOOLS.find((t) => t.name === name);
+
 export function toolsFor(commands: string[]): Tool[] {
   const firsts = commands.flatMap((c) => c.split(/&&|\|\||;|\|/).map((p) => p.trim().replace(/^sudo\s+/, "")));
   return TOOLS.filter((t) => firsts.some((c) => t.match.test(c)));

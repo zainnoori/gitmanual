@@ -1178,7 +1178,12 @@ function installWay(install: InstallOptions, os: OS): InstallWay | null {
   if (install.release?.assets.some((a) => a.os === os)) return { tag: "Download", title: "Get the ready-made app", sub: `Built for ${label}. No code needed.` };
   if (install.downloadPage?.platforms.includes(os))
     return { tag: "Download", title: "Get the ready-made app", sub: `From ${install.downloadPage.host}, for ${label}. No code needed.` };
-  if (app) return { tag: "Install", title: /script/i.test(app.method) ? "Run the install script" : `Install it with ${app.method}`, sub: `One command on ${label}.` };
+  if (app)
+    return {
+      tag: "Install",
+      title: /script/i.test(app.method) ? "Run the install script" : app.method === "Claude Code plugin" ? "Install it in Claude Code" : `Install it with ${app.method}`,
+      sub: app.method === "Claude Code plugin" ? `${app.command.includes("\n") ? "Two lines" : "One line"}, typed inside Claude Code.` : `One command on ${label}.`,
+    };
   if (install.release?.deviceAssets.length)
     return { tag: "Device app", title: "Install it on your device", sub: "An Android / TV app (.apk), installed from this computer." };
   if (cmds.some((c) => c.kind === "docker")) return { tag: "Docker", title: "Run it with Docker", sub: "Self-hosted: it opens in your browser." };

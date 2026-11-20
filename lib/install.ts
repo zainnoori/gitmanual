@@ -225,6 +225,8 @@ const METHODS: [RegExp, string, OS[], boolean?][] = [
   [/^gem install\b/, "RubyGems", ["mac", "windows", "linux"]],
   [/^dotnet tool install\b/, ".NET tool", ["mac", "windows", "linux"]],
   [/^(conda|mamba) install\b/, "conda", ["mac", "windows", "linux"]],
+  // Typed inside Claude Code (or its CLI): a plugin from the repo's own marketplace (.claude-plugin/marketplace.json).
+  [/^(\/plugin|claude plugin) (marketplace add|install)\b/, "Claude Code plugin", ["mac", "windows", "linux"]],
   [/^docker (run|pull)\b/, "Docker", ["mac", "windows", "linux"]],
   // The whole stack from the repo's compose file; "up -d postgres" style partial starts are dev helpers, not the app.
   [/^docker[- ]compose (-f \S+ )?up( -d| --detach| --build)*\s*$/, "Docker", ["mac", "windows", "linux"]],
@@ -267,6 +269,25 @@ export function readmeInstallCommands(readme: string | undefined, repo: { owner:
     out.push({ command, method: hit[1], os, script: Boolean(hit[3]), kind });
     if (out.length >= 12) break;
   }
+  // "/plugin marketplace add owner/repo" then "/plugin install name@marketplace" are one install in two lines: each
+  // add goes with the install from its marketplace (named after the repo), else the install that follows it. A
+  // marketplace added from a local folder ("$PWD/repo") only works after cloning, so those aren't installs.
+  const isPlugin = (c: InstallCommand) => c.method === "Claude Code plugin";
+  if (out.some((c) => isPlugin(c) && /marketplace add\s+["']?(\$|\.|\/|~)/.test(c.command))) return out.filter((c) => !isPlugin(c));
+  for (const add of out.filter((c) => isPlugin(c) && /marketplace add/.test(c.command))) {
+    const market = norm(add.command.match(/marketplace add\s+["']?\S*?([\w.-]+)["']?\s*$/)?.[1] ?? "");
+    const installs = out.filter((c) => isPlugin(c) && !/marketplace add|\n/.test(c.command));
+    const install = installs.find((c) => norm(c.command.match(/@([\w.-]+)/)?.[1] ?? "") === market) ?? installs.find((c) => out.indexOf(c) > out.indexOf(add));
+    if (!install) continue;
+    add.command = `${add.command}\n${install.command}`;
+    out.splice(out.indexOf(install), 1);
+  }
+  // Another plugin from a marketplace the README adds needs that add first too; the official marketplace is built in.
+  const firstAdd = out.find((c) => isPlugin(c) && /marketplace add/.test(c.command))?.command.split("\n")[0];
+  if (firstAdd)
+    for (const c of out)
+      if (isPlugin(c) && !/marketplace add/.test(c.command) && /@[\w.-]+/.test(c.command) && !/@claude-plugins-official\b/.test(c.command))
+        c.command = `${firstAdd}\n${c.command}`;
   return out;
 }
 
@@ -337,6 +358,7 @@ const NEEDS: [RegExp, string][] = [
   [/^Scoop$/, "Scoop"],
   [/^Chocolatey$/, "Chocolatey"],
   [/^Nix$/, "Nix"],
+  [/^Claude Code plugin$/, "Claude Code"],
 ];
 
 // Which Linux a distro package is for, so "Alternative: distro package" says "Gentoo (emerge)".
@@ -409,7 +431,8 @@ export function installChoices(
         note: spec.extras.some((e) => /^all$/i.test(e)) ? "Installs all built-in optional features." : undefined,
       };
     }
-    return { ...base, role: "alternative", label: `Alternative: ${methodName(c)}` };
+    const note = c.method === "Claude Code plugin" ? "Type these inside Claude Code, not in a terminal." : undefined;
+    return { ...base, role: "alternative", label: `Alternative: ${methodName(c)}`, note };
   });
 
   // One recommended way: the full pip install if there is one, else the README's first install.

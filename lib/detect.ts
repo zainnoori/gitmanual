@@ -1,6 +1,6 @@
 import type { TreeEntry } from "./github";
-import { OS_LIST, adaptCommand, dockerInstall, miseInstall, runtimeInstall, type OS } from "./os";
-import { COMPAT_SECTIONS, UNDO_SECTIONS, extractReadmeSection, tipsFor, toolsFor, type ReadmeSection } from "./readme";
+import { OS_LIST, adaptCommand, dockerInstall, miseInstall, pythonVenv, runtimeInstall, type OS } from "./os";
+import { COMPAT_SECTIONS, UNDO_SECTIONS, extractReadmeSection, tipsFor, toolNamed, toolsFor, type ReadmeSection } from "./readme";
 
 export type Item = { name: string; detail?: string; source: string };
 export type EnvVar = { name: string; example: string; secret: boolean; optional?: boolean; source: string };
@@ -442,6 +442,7 @@ export function analyze(
       (firstMatch(py, /^python\s*=\s*["']([^"']+)/m) && { v: firstMatch(py, /^python\s*=\s*["']([^"']+)/m)!, s: "pyproject.toml (poetry)" }) ||
       (firstMatch(files["runtime.txt"], /python-([\d.]+)/) && { v: firstMatch(files["runtime.txt"], /python-([\d.]+)/)!, s: "runtime.txt" }) ||
       (firstMatch(ciText, /python-version:\s*['"]?([\d.x]+)/) && { v: firstMatch(ciText, /python-version:\s*['"]?([\d.x]+)/)!, s: firstCi! }) ||
+      (readmePython(readmeOf(files)) && { v: readmePython(readmeOf(files))!, s: "README" }) ||
       undefined;
     runtimes.push({ name: "Python", detail: v?.v ?? "3.x (no version pinned)", source: v?.s ?? "requirements" });
 
@@ -748,7 +749,7 @@ export function analyze(
   if (files["justfile"]) hints.push("justfile found — run `just --list` to see available tasks.");
 
   // ---------- README usage & tools ----------
-  const readmeText = Object.entries(files).find(([p]) => /^readme(\.\w+)?$/i.test(p))?.[1];
+  const readmeText = readmeOf(files);
   const readme = extractReadmeSection(readmeText);
   // Our clone step already covers cloning, so drop it from the README's commands.
   const readmeCmds = (readme?.commands ?? []).filter((c) => !/^git clone\b/.test(c) && !/^cd \S+$/.test(c));
@@ -759,6 +760,19 @@ export function analyze(
   const tools = (dockerOnly ? toolsFor([...(readme?.commands ?? []), "docker build ."]).filter((t) => t.name === "Docker") : toolsFor(readme?.commands ?? [])).filter(
     (t) => !(t.name === "Node.js" && runtimeNames.has("Node.js")) && !(t.name === "Python 3" && runtimeNames.has("Python")),
   );
+  // FFmpeg is a program, not a package: a README that says the project needs it ("requires ffmpeg", "brew install
+  // ffmpeg" in the text) makes it a part to install. A dependency that calls it (yt-dlp merges video and audio with
+  // it; pydub, ffmpeg-python, fluent-ffmpeg and openai-whisper run it) is often for one feature (gradio, open-webui,
+  // mealie), so that only adds a hint.
+  const pkgJson = safeJson(files["package.json"]);
+  const ffmpegDep = [...pythonDeps(files), ...Object.keys({ ...pkgJson?.dependencies })]
+    .map((d) => d.toLowerCase().replace(/\[.*$/, ""))
+    .find((d) => /^(yt-dlp|pydub|ffmpeg-python|fluent-ffmpeg|openai-whisper)$/.test(d));
+  const ffmpeg = toolNamed("FFmpeg");
+  const hasFfmpeg = () => tools.some((t) => t.name === "FFmpeg");
+  if (!dockerOnly && ffmpeg && !hasFfmpeg() && /\b(?:requires?|needs?|install(?:s|ed|ing)?|depends on)\s+`?ffmpeg\b/i.test(readmeText ?? "")) tools.push(ffmpeg);
+  if (!dockerOnly && ffmpegDep && !hasFfmpeg())
+    hints.push(`Some features may need FFmpeg (${ffmpegDep} uses it): ${Object.values(ffmpeg?.install ?? {}).length ? "brew install ffmpeg, winget install Gyan.FFmpeg or sudo apt install ffmpeg" : "install it from ffmpeg.org"}.`);
   const shellScripts = allPaths.filter((p) => /\.sh$/.test(p) && !p.includes("node_modules"));
   const runsShellScripts = readmeCmds.some((c) => /\.sh\b/.test(c));
   if (!stacks.length && shellScripts.length) stacks.push("Shell scripts");
@@ -785,7 +799,10 @@ export function analyze(
   const submodules = has(".gitmodules") || allPaths.includes(".gitmodules");
 
   const buildSteps = (os: OS): Step[] => {
-    const adapt = (cmds: string[]) => dedupe(cmds, (c) => c).map((c) => adaptCommand(c, os));
+    const python = runtimes.find((r) => r.name === "Python");
+    const venv = pythonVenv(os, { version: python?.detail?.match(/\d/) ? python.detail : undefined, pinnedFile: python ? pinnedFiles.has(python.source) : false });
+    const adapt = (cmds: string[]) =>
+      dedupe(cmds, (c) => c).map((c) => adaptCommand(c === "python -m venv .venv" && installCmds.includes(c) ? venv : c, os));
     const steps: Step[] = [];
     if (compatibility) {
       steps.push({
@@ -924,3 +941,15 @@ export function analyze(
     pythonPackage: pythonPackageOf(files, repo.repo),
   };
 }
+
+// "Python 3.10+", "Python >= 3.10", "requires Python 3.10 or newer": a README's minimum Python, as ">=3.10". Only these
+// clear forms; a version mentioned in passing ("tested on 3.8") isn't a requirement.
+export function readmePython(readme: string | undefined): string | null {
+  if (!readme) return null;
+  const m =
+    readme.match(/\bPython\s*(?:version\s*)?(?:>=|≥)\s*(3\.\d{1,2})\b/i) ??
+    readme.match(/\bPython\s*(?:version\s*)?(3\.\d{1,2})(?:\+|\s*(?:or|and)\s*(?:newer|higher|later|above|up)\b)/i);
+  return m ? `>=${m[1]}` : null;
+}
+
+const readmeOf = (files: Record<string, string>) => Object.entries(files).find(([p]) => /^readme(\.\w+)?$/i.test(p))?.[1];

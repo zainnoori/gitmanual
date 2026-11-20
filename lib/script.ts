@@ -22,7 +22,9 @@ const PLACEHOLDER = /<[a-z][\w -]*>|\bYOUR_[A-Z_]+\b|\byour[-_](?:api[-_])?(?:ke
 // Installer command → the program it provides, so the script can skip what's already installed.
 const PROVIDES: [RegExp, string][] = [
   [/^brew install nvm\b/, "nvm"],
-  [/^brew install (?:--cask )?(?:python(?:@[\d.]+)?)\b/, "python3"],
+  // A versioned Python is checked by its own command: python3 may be a newer Python the project can't use.
+  [/^brew install python@(\d+\.\d+)\b/, "python$1"],
+  [/^brew install (?:--cask )?python\b/, "python3"],
   [/^brew install (?:--cask )?openjdk\b/, "java"],
   [/^brew install (?:--cask )?dotnet-sdk\b/, "dotnet"],
   [/^brew install (?:--cask )?docker\b/, "docker"],
@@ -54,6 +56,7 @@ const PROVIDES: [RegExp, string][] = [
   [/^pipx install ([\w.-]+)/, "$1"],
   [/^sudo snap install ([\w.-]+)/, "$1"],
   [/^sudo apt(?:-get)? install (?:-y )?build-essential\b/, "gcc"],
+  [/^sudo apt(?:-get)? install (?:-y )?python3 (python\d+\.\d+)\b/, "$1"],
   [/^sudo apt(?:-get)? install (?:-y )?python3\b/, "python3"],
   [/^sudo apt(?:-get)? install (?:-y )?openjdk-/, "java"],
   [/^sudo apt(?:-get)? install (?:-y )?dotnet-sdk/, "dotnet"],

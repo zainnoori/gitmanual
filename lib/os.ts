@@ -13,6 +13,61 @@ export function major(v: string | undefined): string | undefined {
   return v?.match(/(\d+)/)?.[1];
 }
 
+// The Python to install when a repo doesn't pin one exactly. The newest Python isn't safe: packages with compiled
+// parts ship builds for a new release months later (2026-11-19: Homebrew's python was 3.15, and onnxruntime, which
+// faster-whisper needs, had builds up to 3.14 only, so pip found nothing to install). 3.13 has builds for numpy,
+// scipy, torch, onnxruntime, pandas and tensorflow.
+export const DEFAULT_PYTHON = "3.13";
+const PYTHON_CHOICES = ["3.13", "3.12", "3.14", "3.11", "3.10", "3.9", "3.8"];
+
+const pyNum = (mm: string) => mm.split(".").map(Number) as [number, number];
+const pyCmp = (a: string, b: string) => {
+  const [a1, a2] = pyNum(a);
+  const [b1, b2] = pyNum(b);
+  return a1 - b1 || a2 - b2;
+};
+
+// An exact Python version ("3.11", "3.11.4", "==3.11.*", "3.11.x"), as major.minor; null for a range or nothing.
+export function pythonExact(v: string | undefined): string | null {
+  const m = v?.trim().match(/^(?:==\s*)?(\d+\.\d+)(?:\.[\dx*]+)?$/);
+  return m ? m[1] : null;
+}
+
+// The Python to install for a version requirement: an exact pin as it is, otherwise DEFAULT_PYTHON when the range
+// allows it, else the closest version it allows (">=3.14" → 3.14, ">=3.8,<3.12" → 3.11).
+export function pythonTarget(v: string | undefined): string {
+  const exact = pythonExact(v);
+  if (exact) return exact;
+  const ok: ((mm: string) => boolean)[] = [];
+  for (const part of (v ?? "").split(/[,\s]+(?=[<>=!~^\d])/)) {
+    const m = part.trim().match(/^(>=|>|<=|<|~=|\^|~|!=)?\s*(\d+)(?:\.(\d+))?(?:\.(\d+|\*))?(\+)?$/);
+    if (!m) continue;
+    const [, op = "", maj, min = "0", patch, plus] = m;
+    const mm = `${maj}.${min}`;
+    const hasPatch = patch !== undefined && patch !== "*" && patch !== "0";
+    if (op === ">=" || plus) ok.push((x) => pyCmp(x, mm) >= 0);
+    else if (op === ">") ok.push((x) => (hasPatch ? pyCmp(x, mm) >= 0 : pyCmp(x, mm) > 0));
+    else if (op === "<") ok.push((x) => (hasPatch ? pyCmp(x, mm) <= 0 : pyCmp(x, mm) < 0));
+    else if (op === "<=") ok.push((x) => pyCmp(x, mm) <= 0);
+    else if (op === "^" || op === "~=") ok.push((x) => pyCmp(x, mm) >= 0 && pyNum(x)[0] === Number(maj));
+    else if (op === "~") ok.push((x) => pyCmp(x, mm) === 0);
+    else if (op === "!=") ok.push((x) => !(patch === undefined || patch === "*") || pyCmp(x, mm) !== 0);
+  }
+  return PYTHON_CHOICES.find((c) => ok.every((f) => f(c))) ?? DEFAULT_PYTHON;
+}
+
+// The command that creates a project's virtual environment with the Python the manual installs: Homebrew and
+// Debian/Ubuntu have no plain "python" command, and a newer Python already on the Mac mustn't be picked by accident.
+export function pythonVenv(os: OS, ctx: RuntimeCtx): string {
+  if (os === "windows") return "python -m venv .venv";
+  if (os === "linux") {
+    if (ctx.pinnedFile) return "python -m venv .venv"; // pyenv's python, from the pinned file
+    const exact = pythonExact(ctx.version);
+    return exact ? `python${exact} -m venv .venv` : "python3 -m venv .venv";
+  }
+  return `python${pythonTarget(ctx.version)} -m venv .venv`;
+}
+
 type RuntimeCtx = {
   version?: string;
   pinnedFile?: boolean; // version comes from a file the version manager reads itself (.nvmrc, .python-version…)
@@ -39,15 +94,17 @@ export function runtimeInstall(name: string, os: OS, ctx: RuntimeCtx): string[] 
           os === "mac" ? "brew install uv" : os === "windows" ? "winget install astral-sh.uv" : "curl -LsSf https://astral.sh/uv/install.sh | sh",
         ];
       }
-      const mm = majorMinor(v)?.includes(".") ? majorMinor(v) : undefined;
+      // Linux uses the distro's Python unless one is pinned exactly: distros don't ship the newest release, and
+      // apt has no package for most other versions.
+      const exact = pythonExact(v);
       const base =
         os === "mac"
-          ? [`brew install python${mm ? `@${mm}` : ""}`]
+          ? [`brew install python@${pythonTarget(v)}`]
           : os === "windows"
-            ? [`winget install Python.Python.${mm ?? "3.12"}`]
+            ? [`winget install Python.Python.${pythonTarget(v)}`]
             : ctx.pinnedFile
               ? ["# needs pyenv: https://github.com/pyenv/pyenv", "pyenv install --skip-existing"]
-              : [`sudo apt install python3${mm ? ` python${mm}` : ""} python3-venv  # Debian/Ubuntu`];
+              : [`sudo apt install python3${exact ? ` python${exact}` : ""} python3-venv  # Debian/Ubuntu`];
       if (ctx.packageManager === "poetry") base.push("pipx install poetry");
       if (ctx.packageManager === "pipenv") base.push("pipx install pipenv");
       if (ctx.packageManager === "pdm") base.push("pipx install pdm");

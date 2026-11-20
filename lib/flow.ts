@@ -38,7 +38,7 @@ export function setupFlow(a: Analysis, install: InstallOptions, os: OS): Flow {
   const app = cmds.find((c) => c.kind === "app");
   if (app) {
     const how = /script/i.test(app.method) ? "Run the install script" : `Install with ${app.method}`;
-    get.push({ id: "command", label: how, detail: `One command on ${label}`, jump: INSTALL });
+    get.push({ id: "command", label: how, detail: app.method === "Claude Code plugin" ? "Typed inside Claude Code" : `One command on ${label}`, jump: INSTALL });
   }
   if (install.release?.deviceAssets.length) get.push({ id: "device", label: "Install on your device", detail: "Android / TV app (.apk)", jump: INSTALL });
   const docker = cmds.find((c) => c.kind === "docker");
