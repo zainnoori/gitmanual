@@ -170,6 +170,8 @@ function psLine(line: ScriptLine, need: string[] | null = null): string {
   const [command, note] = splitNote(line.command);
   let cmd = command;
   if (/^winget install /.test(cmd) && !/--accept/.test(cmd)) cmd = `${cmd} -e --accept-source-agreements --accept-package-agreements`;
+  // winget exits with an error code when the package is already there and has no newer version; that's a success.
+  if (/^winget install /.test(cmd)) cmd = `${cmd}; Skip-Installed`;
   const bin = provides(cmd);
   const copy = cmd.match(/^Copy-Item (\S+) (\S+)$/);
   if (cmd === "mise install") {
@@ -185,7 +187,10 @@ function psLine(line: ScriptLine, need: string[] | null = null): string {
   const out = copy
     ? `if (-not (Test-Path ${copy[2]})) { Copy-Item ${copy[1]} ${copy[2]} }`
     : bin
-      ? `if (-not (Have ${psQuote(bin)})${bin === "nvm" ? " -and -not (Have 'node')" : ""}${bin === "mise" && need ? ` -and -not (${need.map((b) => `(Have ${psQuote(b)})`).join(" -and ")})` : ""}) { Invoke-Step { ${cmd} }; Update-Path }`
+      ? `if (-not (Have ${psQuote(bin)})${bin === "nvm" ? " -and -not (Have 'node')" : ""}${bin === "mise" && need ? ` -and -not (${need.map((b) => `(Have ${psQuote(b)})`).join(" -and ")})` : ""}) { Invoke-Step { ${cmd} }; Update-Path }` +
+        // Python from python.org without "Add to PATH" (or already installed when winget ran) has only the py launcher.
+        // py with no version uses the active venv once there is one, like python would.
+        (bin === "python" ? "\nif (-not (Have 'python') -and (Have 'py')) { function python { py @args } }" : "")
       : `Invoke-Step { ${cmd} }`;
   return note ? `# ${note}\n${out}` : out;
 }
@@ -262,6 +267,8 @@ export function buildScript(steps: Step[], os: OS, fullName: string, site: strin
         'function Update-Path { $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User") }',
         "# Stop when a program fails, like bash's set -e. Dot-sourced, so cd and venv activation carry on to the next step.",
         'function Invoke-Step([scriptblock]$Block) { $global:LASTEXITCODE = 0; . $Block; if ($LASTEXITCODE) { throw "Failed with exit code $LASTEXITCODE" } }',
+        '# winget\'s "already installed" and "no newer version" (0x8A150061, 0x8A15002B) aren\'t failures.',
+        "function Skip-Installed { if ($LASTEXITCODE -in -1978335135, -1978335189) { $global:LASTEXITCODE = 0 } }",
         ...body,
         "",
         ...done.map((l) => `Write-Host ${psQuote(l)}`),
