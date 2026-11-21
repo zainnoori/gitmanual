@@ -136,6 +136,7 @@ const SCHEMA = `
     ref_kind TEXT NOT NULL,         -- problem | purchase | subscription | custom: what the email was about (/admin/email)
     ref_id TEXT NOT NULL,           -- problems.id, purchases.session, subscriptions.subscription; '' for custom
     to_hint TEXT NOT NULL,          -- the address, masked (j***@gmail.com): enough to tell sends apart, not to reuse
+    from_address TEXT,              -- which of our addresses it came from (hello@ or the personal one)
     subject TEXT NOT NULL,
     admin TEXT NOT NULL,            -- GitHub login of the admin who sent it
     resend_id TEXT                  -- Resend's email id, to look it up in their dashboard
@@ -1199,13 +1200,13 @@ export async function subscriptionById(subscription: string): Promise<(Subscript
 
 // Emails sent from /admin/email. The address is kept masked: enough to tell which one it went to.
 export type EmailRef = { kind: "problem" | "purchase" | "subscription" | "custom"; id: string };
-export type EmailSent = { id: number; sentAt: number; ref: EmailRef; toHint: string; subject: string; admin: string; resendId: string | null };
+export type EmailSent = { id: number; sentAt: number; ref: EmailRef; toHint: string; fromAddress: string | null; subject: string; admin: string; resendId: string | null };
 
 export async function logEmail(e: Omit<EmailSent, "id" | "sentAt">): Promise<void> {
   await strictly((c) =>
     c.execute({
-      sql: "INSERT INTO email_log (sent_at, ref_kind, ref_id, to_hint, subject, admin, resend_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      args: [Date.now(), e.ref.kind, e.ref.id, e.toHint, e.subject, e.admin, e.resendId],
+      sql: "INSERT INTO email_log (sent_at, ref_kind, ref_id, to_hint, from_address, subject, admin, resend_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      args: [Date.now(), e.ref.kind, e.ref.id, e.toHint, e.fromAddress, e.subject, e.admin, e.resendId],
     }),
   );
 }
@@ -1221,6 +1222,7 @@ export async function listEmails(ref?: EmailRef, max = 500): Promise<EmailSent[]
       sentAt: Number(r.sent_at),
       ref: { kind: String(r.ref_kind) as EmailRef["kind"], id: String(r.ref_id) },
       toHint: String(r.to_hint),
+      fromAddress: r.from_address == null ? null : String(r.from_address),
       subject: String(r.subject),
       admin: String(r.admin),
       resendId: r.resend_id == null ? null : String(r.resend_id),

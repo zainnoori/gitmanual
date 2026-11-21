@@ -7,7 +7,9 @@ import type { EmailContext } from "@/lib/email";
 const date = (ms: number) => new Date(ms).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
 const newKey = () => crypto.randomUUID();
 
-type Vars = { name: string; repo: string; manual: string; site: string; details: string };
+type Vars = { name: string; repo: string; manual: string; site: string; details: string; sign: string };
+// "Jen from gitmanual <jen@…>" signs "— Jen"; the brand address signs "— gitmanual".
+const signOf = (from: string) => (/^\s*([^<\s]+)[^<]*</.exec(from)?.[1] ?? "gitmanual").replace(/^"/, "");
 const quote = (s: string) =>
   s
     .trim()
@@ -18,14 +20,14 @@ const quote = (s: string) =>
 
 // Starting points; everything stays editable. {CODE} and the like are left for you to fill in.
 const TEMPLATES: { id: string; label: string; subject: (v: Vars) => string; body: (v: Vars) => string }[] = [
-  { id: "blank", label: "Blank", subject: () => "", body: (v) => `Hi ${v.name},\n\n\n\n— gitmanual` },
+  { id: "blank", label: "Blank", subject: () => "", body: (v) => `Hi ${v.name},\n\n\n\n— ${v.sign}` },
   {
     id: "fixed",
     label: "Fixed it",
     subject: (v) => (v.repo ? `Fixed: the setup for ${v.repo}` : "Fixed: the problem you reported"),
     body: (v) =>
       `Hi ${v.name},\n\nThanks for reporting this${v.repo ? ` on the ${v.repo} manual` : ""}. It's fixed now${v.manual ? `: ${v.manual}` : "."}\n\n` +
-      `If it still doesn't work for you, just reply to this email with what you see and I'll take another look.\n\n— gitmanual`,
+      `If it still doesn't work for you, just reply to this email with what you see and I'll take another look.\n\n— ${v.sign}`,
   },
   {
     id: "details",
@@ -33,7 +35,7 @@ const TEMPLATES: { id: string; label: string; subject: (v: Vars) => string; body
     subject: (v) => (v.repo ? `About the problem with ${v.repo}` : "About the problem you reported"),
     body: (v) =>
       `Hi ${v.name},\n\nThanks for reporting this${v.repo ? ` on the ${v.repo} manual` : ""}.${v.details ? `\n\n${quote(v.details)}` : ""}\n\n` +
-      `To find out what went wrong, could you reply with:\n\n- Your system (macOS, Windows or Linux, and its version)\n- The step it stopped at\n- Everything the terminal printed, copied in full\n\n— gitmanual`,
+      `To find out what went wrong, could you reply with:\n\n- Your system (macOS, Windows or Linux, and its version)\n- The step it stopped at\n- Everything the terminal printed, copied in full\n\n— ${v.sign}`,
   },
   {
     id: "promo",
@@ -41,7 +43,7 @@ const TEMPLATES: { id: string; label: string; subject: (v: Vars) => string; body
     subject: () => "A code for gitmanual",
     body: (v) =>
       `Hi ${v.name},\n\nThanks for using gitmanual. Here's a code for {WHAT IT GIVES, e.g. 50% off your first month of Pro}:\n\n**{CODE}**\n\n` +
-      `Enter it at checkout under "Add promotion code": ${v.site}/pro\n\nIt works once and ends on {DATE}.\n\n— gitmanual`,
+      `Enter it at checkout under "Add promotion code": ${v.site}/pro\n\nIt works once and ends on {DATE}.\n\n— ${v.sign}`,
   },
   {
     id: "sorry",
@@ -49,7 +51,7 @@ const TEMPLATES: { id: string; label: string; subject: (v: Vars) => string; body
     subject: (v) => (v.repo ? `Your report for ${v.repo}` : "Your gitmanual purchase"),
     body: (v) =>
       `Hi ${v.name},\n\nSorry the report${v.repo ? ` for ${v.repo}` : ""} didn't work out as it should. {WHAT YOU DID: refunded it, fixed it, …}\n\n` +
-      `If anything else isn't right, just reply to this email.\n\n— gitmanual`,
+      `If anything else isn't right, just reply to this email.\n\n— ${v.sign}`,
   },
 ];
 
@@ -57,6 +59,8 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
   const [ctx, setCtx] = useState<EmailContext | null>(null);
   const [sent, setSent] = useState<EmailSent[]>([]);
   const [enabled, setEnabled] = useState(true);
+  const [senders, setSenders] = useState<{ brand: string; personal: string | null }>({ brand: "gitmanual <hello@gitmanual.com>", personal: null });
+  const [from, setFrom] = useState<"brand" | "personal">("brand");
   const [error, setError] = useState<"denied" | string | null>(null);
 
   const [to, setTo] = useState("");
@@ -66,7 +70,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
   const [template, setTemplate] = useState("blank");
   const [undo, setUndo] = useState<{ subject: string; body: string } | null>(null);
 
-  const [preview, setPreview] = useState<{ to: string; html: string } | null>(null);
+  const [preview, setPreview] = useState<{ to: string; from: string; html: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
   const [key, setKey] = useState(newKey);
@@ -74,8 +78,9 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
   const vars = useMemo<Vars>(() => {
     const site = typeof window === "undefined" ? "" : window.location.origin;
     const repo = ctx?.repo ?? "";
-    return { name: ctx?.name ?? "there", repo, manual: repo ? `${site}/${repo}` : "", site, details: ctx?.details ?? "" };
-  }, [ctx]);
+    const sign = from === "personal" && senders.personal ? signOf(senders.personal) : "gitmanual";
+    return { name: ctx?.name ?? "there", repo, manual: repo ? `${site}/${repo}` : "", site, details: ctx?.details ?? "", sign };
+  }, [ctx, from, senders]);
 
   const load = () => {
     const q = kind === "custom" ? "" : `?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`;
@@ -84,6 +89,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) return setError(j.error ?? "Couldn't load it.");
       setEnabled(j.enabled);
+      if (j.senders) setSenders(j.senders);
       setSent(j.sent ?? []);
       return j.context as EmailContext | undefined;
     });
@@ -95,7 +101,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
       setCtx(context);
       setTo(context.to ?? "");
       const first = context.ref.kind === "problem" ? (context.to ? "fixed" : "details") : "blank";
-      const v: Vars = { ...vars, name: context.name ?? "there", repo: context.repo ?? "", manual: context.repo ? `${window.location.origin}/${context.repo}` : "", details: context.details ?? "" };
+      const v: Vars = { ...vars, name: context.name ?? "there", repo: context.repo ?? "", manual: context.repo ? `${window.location.origin}/${context.repo}` : "", details: context.details ?? "", sign: "gitmanual" };
       const t = TEMPLATES.find((x) => x.id === first)!;
       setTemplate(first);
       setSubject(t.subject(v));
@@ -105,7 +111,15 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
   }, [kind, id]);
 
   // Anything edited makes the preview out of date.
-  useEffect(() => setPreview(null), [to, subject, body, format]);
+  useEffect(() => setPreview(null), [to, subject, body, format, from]);
+
+  // Switching who it's from swaps the sign-off, when the message still ends with the old one.
+  const pickFrom = (f: "brand" | "personal") => {
+    const sign = (x: "brand" | "personal") => (x === "personal" && senders.personal ? signOf(senders.personal) : "gitmanual");
+    const old = `— ${sign(from)}`;
+    setBody((b) => (b.trimEnd().endsWith(old) ? b.trimEnd().slice(0, -old.length) + `— ${sign(f)}` : b));
+    setFrom(f);
+  };
 
   const pick = (tid: string) => {
     const t = TEMPLATES.find((x) => x.id === tid)!;
@@ -132,7 +146,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
       const r = await fetch("/api/admin/email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: ctx?.ref.kind, id: ctx?.ref.id, to: to.trim() !== (ctx?.to ?? "") ? to.trim() : "", subject, body, format, key, ...extra }),
+        body: JSON.stringify({ kind: ctx?.ref.kind, id: ctx?.ref.id, to: to.trim() !== (ctx?.to ?? "") ? to.trim() : "", from, subject, body, format, key, ...extra }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
@@ -150,7 +164,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
 
   const showPreview = async () => {
     const j = await post({ preview: true });
-    if (j) setPreview({ to: j.to, html: j.html });
+    if (j) setPreview({ to: j.to, from: j.from, html: j.html });
   };
 
   const send = async () => {
@@ -191,6 +205,23 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
       )}
 
       <div className="em-form">
+        <fieldset className="rp-kinds">
+          <legend>From</legend>
+          <label className={from === "brand" ? "on" : ""}>
+            <input type="radio" name="from" checked={from === "brand"} onChange={() => pickFrom("brand")} />
+            {senders.brand}
+          </label>
+          {senders.personal ? (
+            <label className={from === "personal" ? "on" : ""}>
+              <input type="radio" name="from" checked={from === "personal"} onChange={() => pickFrom("personal")} />
+              {senders.personal}
+            </label>
+          ) : (
+            <small className="em-hint">
+              Add a personal sender with <code>EMAIL_FROM_PERSONAL</code> in Vercel, e.g. <code>Jen from gitmanual &lt;jen@gitmanual.com&gt;</code>.
+            </small>
+          )}
+        </fieldset>
         <label className="rp-field">
           <span>
             To <small>{to.trim() && to.trim() !== ctx.to ? "Your own address for them" : ctx.toNote}</small>
@@ -279,7 +310,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
           <p>
             <strong>To:</strong> {preview.to}
             <br />
-            <strong>From:</strong> gitmanual &lt;hello@gitmanual.com&gt;
+            <strong>From:</strong> {preview.from}
             <br />
             <strong>Subject:</strong> {subject}
           </p>
@@ -305,6 +336,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
                 <th scope="col">To</th>
                 <th scope="col">Subject</th>
                 <th scope="col">About</th>
+                <th scope="col">From</th>
                 <th scope="col">By</th>
               </tr>
             </thead>
@@ -323,6 +355,7 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
                       </a>
                     )}
                   </td>
+                  <td>{e.fromAddress ?? "—"}</td>
                   <td>@{e.admin}</td>
                 </tr>
               ))}

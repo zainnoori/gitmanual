@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { type EmailRef, getProblem, listEmails, logEmail, purchaseBySession, subscriptionById } from "@/lib/db";
-import { EMAIL_ENABLED, isEmail, maskEmail, composeEmail, sendAdminEmail, type Composed, type EmailContext } from "@/lib/email";
+import { brandSender, EMAIL_ENABLED, isEmail, maskEmail, composeEmail, personalSender, sendAdminEmail, type Composed, type EmailContext } from "@/lib/email";
 import { PRO_ENABLED, stripe } from "@/lib/stripe";
 import { isAdmin, viewer } from "@/lib/viewer";
 
@@ -85,22 +85,25 @@ async function context(ref: EmailRef): Promise<EmailContext | null> {
   };
 }
 
+// The two ways to sign: the brand address, and a person's (EMAIL_FROM_PERSONAL) when it's set.
+const senders = () => ({ brand: brandSender().value, personal: personalSender()?.value ?? null });
+
 // ?kind=problem&id=12 → who it goes to and the emails already sent about it. No kind → every recent email.
 export async function GET(req: Request) {
   if (!(await admin())) return NextResponse.json({ error: "Admins only." }, { status: 403, headers: NO_STORE });
   const q = new URL(req.url).searchParams;
   try {
-    if (!q.get("kind")) return NextResponse.json({ enabled: EMAIL_ENABLED(), sent: await listEmails() }, { headers: NO_STORE });
+    if (!q.get("kind")) return NextResponse.json({ enabled: EMAIL_ENABLED(), senders: senders(), sent: await listEmails() }, { headers: NO_STORE });
     const ref = parseRef(q.get("kind"), q.get("id"));
     const ctx = ref && (await context(ref));
     if (!ref || !ctx) return NextResponse.json({ error: "Nothing found to write about." }, { status: 404, headers: NO_STORE });
-    return NextResponse.json({ enabled: EMAIL_ENABLED(), context: ctx, sent: ref.kind === "custom" ? [] : await listEmails(ref) }, { headers: NO_STORE });
+    return NextResponse.json({ enabled: EMAIL_ENABLED(), senders: senders(), context: ctx, sent: ref.kind === "custom" ? [] : await listEmails(ref) }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ error: "The database didn't answer. Try again in a minute." }, { status: 503, headers: NO_STORE });
   }
 }
 
-// { kind, id, to?, subject, body, format, key, preview? }. "to" replaces the address found for it.
+// { kind, id, to?, from?, subject, body, format, key, preview? }. from: "personal" signs as EMAIL_FROM_PERSONAL. "to" replaces the address found for it.
 export async function POST(req: Request) {
   const user = await admin();
   if (!user) return NextResponse.json({ error: "Admins only." }, { status: 403, headers: NO_STORE });
@@ -128,14 +131,18 @@ export async function POST(req: Request) {
   const to = typed || ctx.to;
   if (!to) return fail("There's no address for this. Type one.");
 
+  const personal = b.from === "personal" ? personalSender() : null;
+  if (b.from === "personal" && !personal) return fail("No personal sender is set (EMAIL_FROM_PERSONAL).");
+  const from = (personal ?? brandSender()).value;
+
   const c: Composed = { subject, body, format };
-  if (b.preview) return NextResponse.json({ to, ...composeEmail(c) }, { headers: NO_STORE });
+  if (b.preview) return NextResponse.json({ to, from, ...composeEmail(c) }, { headers: NO_STORE });
 
   if (!EMAIL_ENABLED()) return fail("Sending is off: RESEND_API_KEY isn't set on this server.", 503);
   if (!key) return fail("Missing send key. Reload the page and try again.");
-  const id = await sendAdminEmail(to, c, key);
+  const id = await sendAdminEmail(to, c, key, personal ?? undefined);
   if (id === null) return fail("Resend didn't send it. The reason is in the Vercel logs (often the domain isn't verified yet).", 502);
   // Sent; a failed log line shouldn't make it look unsent.
-  await logEmail({ ref, toHint: maskEmail(to), subject, admin: user.login, resendId: id || null }).catch((e) => console.error("gitmanual admin email: log failed:", e));
+  await logEmail({ ref, toHint: maskEmail(to), fromAddress: (personal ?? brandSender()).address, subject, admin: user.login, resendId: id || null }).catch((e) => console.error("gitmanual admin email: log failed:", e));
   return NextResponse.json({ sent: true, toHint: maskEmail(to) }, { headers: NO_STORE });
 }

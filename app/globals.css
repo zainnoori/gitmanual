@@ -740,6 +740,7 @@ code.flow-label { font: 600 var(--fs-meta)/1.4 var(--mono); background: none; bo
 .em-form { display: grid; gap: 14px; max-width: 760px; margin-top: 12px; }
 .em-form .rp-kinds label:has(input[type="file"]) { border-style: dashed; }
 .em-row { margin-top: 8px; }
+.em-hint { align-self: center; color: var(--pencil); font-size: var(--fs-meta); }
 .em-reset { justify-self: start; margin-top: -8px; font-size: var(--fs-meta); }
 .em-details pre { margin: 6px 0 0; padding: 8px 10px; max-height: 220px; overflow: auto; border-radius: 8px; background: var(--paper); font: var(--fs-meta)/1.45 var(--mono); white-space: pre-wrap; }
 .em-warn { margin: -6px 0 0; font-size: var(--fs-meta); color: var(--wrench-2); }

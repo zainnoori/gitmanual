@@ -3,6 +3,8 @@ import { SITE_URL } from "./site";
 
 // Thank-you emails after a payment, sent through Resend (https://resend.com) from the Stripe webhook.
 // Off unless RESEND_API_KEY is set. EMAIL_FROM overrides the sender; replies go to EMAIL_REPLY_TO (default hello@).
+// EMAIL_FROM_PERSONAL (e.g. "Jen from gitmanual <jen@gitmanual.com>") adds a personal sender to /admin/email; replies
+// to those go to that address. Both must be on the domain verified in Resend.
 // Each email has an idempotency key, so Stripe sending the same event twice sends one email (Resend keeps keys 24 hours).
 // Mostly a thank-you, with one short "also on gitmanual" part; no mailing list, nothing sent again later.
 
@@ -10,7 +12,19 @@ const FROM = () => process.env.EMAIL_FROM || "gitmanual <hello@gitmanual.com>";
 const REPLY_TO = () => process.env.EMAIL_REPLY_TO || "hello@gitmanual.com";
 export const EMAIL_ENABLED = () => Boolean(process.env.RESEND_API_KEY);
 
-type Mail = { to: string; subject: string; text: string; html: string; key: string };
+type Mail = { to: string; subject: string; text: string; html: string; key: string; from?: Sender };
+
+// "Name <address>" → its parts; null when the setting isn't one address on its own.
+export type Sender = { name: string; address: string; value: string };
+const sender = (v: string | undefined): Sender | null => {
+  const m = /^\s*(?:"?([^"<>]*?)"?\s*<([^\s<>@]+@[^\s<>@]+\.[A-Za-z]{2,})>|([^\s<>@]+@[^\s<>@]+\.[A-Za-z]{2,}))\s*$/.exec(v ?? "");
+  if (!m) return null;
+  const address = m[2] ?? m[3];
+  const name = (m[1] ?? "").trim();
+  return { name, address, value: name ? `${name} <${address}>` : address };
+};
+export const brandSender = (): Sender => sender(FROM()) ?? { name: "gitmanual", address: "hello@gitmanual.com", value: "gitmanual <hello@gitmanual.com>" };
+export const personalSender = (): Sender | null => sender(process.env.EMAIL_FROM_PERSONAL);
 
 // Resend's id for the email, or null when it wasn't sent (the reason is logged).
 async function deliver(m: Mail): Promise<string | null> {
@@ -19,7 +33,7 @@ async function deliver(m: Mail): Promise<string | null> {
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "Idempotency-Key": m.key },
-    body: JSON.stringify({ from: FROM(), to: [m.to], reply_to: REPLY_TO(), subject: m.subject, text: m.text, html: m.html }),
+    body: JSON.stringify({ from: m.from?.value ?? FROM(), to: [m.to], reply_to: m.from?.address ?? REPLY_TO(), subject: m.subject, text: m.text, html: m.html }),
     signal: AbortSignal.timeout(8000),
   });
   if (!res.ok) {
@@ -160,8 +174,9 @@ export function composeEmail(c: Composed): { html: string; text: string } {
 }
 
 // key: one per press of Send (made by the browser), so a double click or a retry sends one email.
-export async function sendAdminEmail(to: string, c: Composed, key: string): Promise<string | null> {
-  return deliver({ to, subject: c.subject, key: `admin/${key}`, ...composeEmail(c) });
+// from: the personal sender, or the brand one (replies to EMAIL_REPLY_TO) when left out.
+export async function sendAdminEmail(to: string, c: Composed, key: string, from?: Sender): Promise<string | null> {
+  return deliver({ to, subject: c.subject, key: `admin/${key}`, from, ...composeEmail(c) });
 }
 
 // What /admin/email is writing about (app/api/admin/email).
