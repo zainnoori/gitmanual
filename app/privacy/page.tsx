@@ -86,6 +86,11 @@ export default function Privacy() {
             subscribe and afterwards for billing and tax questions; ask through the contact form to have it deleted once the subscription
             has ended.
           </p>
+          <p>
+            After a Pro subscription or a repo report is paid for, gitmanual sends one thank-you email to the address you gave at
+            checkout, through Resend, under Resend&apos;s privacy policy. gitmanual doesn&apos;t keep that address and adds you to no list.
+            Otherwise we only write to you one to one, about something you bought or reported, for example a fix or a discount code.
+          </p>
         </>
       )}
 

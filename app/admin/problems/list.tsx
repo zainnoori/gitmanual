@@ -150,6 +150,10 @@ export function ProblemsAdmin() {
                       </>
                     )}
                     {!p.githubLogin && !p.email && <small>Anonymous</small>}
+                    <br />
+                    <a className="btn btn-sm em-row" href={`/admin/email?kind=problem&id=${p.id}`}>
+                      {p.email ? "Reply" : "Email…"}
+                    </a>
                   </td>
                   <td className="problems-act">
                     {p.status === "open" ? (

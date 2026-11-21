@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
+import { sendProWelcome, sendReportThanks } from "@/lib/email";
 import { recordPurchase, syncSubscription } from "@/lib/pro";
 import { PRO_ENABLED, stripe, WEBHOOK_EVENTS as EVENTS } from "@/lib/stripe";
 
@@ -22,12 +23,14 @@ export async function POST(req: Request) {
     if (event.type === "checkout.session.completed") {
       const s = event.data.object;
       const githubId = Number(s.client_reference_id);
-      if (s.mode === "subscription" && s.subscription && Number.isSafeInteger(githubId) && githubId > 0)
-        await syncSubscription(typeof s.subscription === "string" ? s.subscription : s.subscription.id, githubId);
+      if (s.mode === "subscription" && s.subscription && Number.isSafeInteger(githubId) && githubId > 0) {
+        const sub = await syncSubscription(typeof s.subscription === "string" ? s.subscription : s.subscription.id, githubId);
+        if (sub) await thank(s, (to) => sendProWelcome({ to, plan: sub.plan, session: s.id, live: event.livemode }));
+      }
       // A one-time repo report (app/api/pro/report). recordPurchase checks it's ours and paid.
-      if (s.mode === "payment") await recordPurchase(s);
+      if (s.mode === "payment") await reportPaid(s, event.livemode);
     } else if (event.type === "checkout.session.async_payment_succeeded") {
-      await recordPurchase(event.data.object);
+      await reportPaid(event.data.object, event.livemode);
     } else if ((EVENTS as readonly string[]).includes(event.type) && event.type.startsWith("customer.subscription.")) {
       await syncSubscription((event.data.object as Stripe.Subscription).id);
     }
@@ -37,4 +40,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Couldn't record it." }, { status: 500 });
   }
   return NextResponse.json({ received: true });
+}
+
+async function reportPaid(s: Stripe.Checkout.Session, live: boolean) {
+  const p = await recordPurchase(s);
+  if (p) await thank(s, (to) => sendReportThanks({ to, fullName: p.fullName, session: s.id, live }));
+}
+
+// The thank-you goes to the email given at checkout. It's sent only after the payment is recorded, and a failed
+// email is logged, not retried: Stripe resending the event would only repeat the recording.
+async function thank(s: Stripe.Checkout.Session, send: (to: string) => Promise<boolean>) {
+  const to = s.customer_details?.email ?? s.customer_email;
+  if (!to) return;
+  await send(to).catch((e) => console.error("gitmanual email:", e));
 }

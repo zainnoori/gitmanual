@@ -736,6 +736,19 @@ code.flow-label { font: 600 var(--fs-meta)/1.4 var(--mono); background: none; bo
 .rp-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .rp-foot small { color: var(--pencil); font-size: var(--fs-meta); }
 
+/* /admin/email: write to one person */
+.em-form { display: grid; gap: 14px; max-width: 760px; margin-top: 12px; }
+.em-form .rp-kinds label:has(input[type="file"]) { border-style: dashed; }
+.em-row { margin-top: 8px; }
+.em-reset { justify-self: start; margin-top: -8px; font-size: var(--fs-meta); }
+.em-details pre { margin: 6px 0 0; padding: 8px 10px; max-height: 220px; overflow: auto; border-radius: 8px; background: var(--paper); font: var(--fs-meta)/1.45 var(--mono); white-space: pre-wrap; }
+.em-warn { margin: -6px 0 0; font-size: var(--fs-meta); color: var(--wrench-2); }
+.em-ok { color: var(--ink) !important; font-weight: 600; }
+.em-bad { color: #b42318 !important; font-weight: 600; }
+.em-preview { display: grid; gap: 12px; max-width: 760px; margin-top: 24px; padding: 16px; border: 1.5px solid var(--ink); border-radius: 12px; background: var(--sheet); box-shadow: 4px 4px 0 var(--ink); }
+.em-preview p { margin: 0; font-size: var(--fs-small); }
+.em-preview iframe { width: 100%; height: 520px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; }
+
 /* Landing: repos people set up here */
 .shelf { padding: 72px 0 84px; }
 .shelf-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }

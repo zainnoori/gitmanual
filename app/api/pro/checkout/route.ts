@@ -30,6 +30,7 @@ export async function POST(req: Request) {
     const session = await stripe().checkout.sessions.create({
       mode: "subscription",
       managed_payments: { enabled: true },
+      allow_promotion_codes: true, // codes made in Stripe (Product catalog → Coupons), e.g. sent from /admin/email
       line_items: [{ price: prices[plan].id, quantity: 1 }],
       client_reference_id: String(user.id),
       ...(subscription?.customer && { customer: subscription.customer }),

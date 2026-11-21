@@ -130,6 +130,17 @@ const SCHEMA = `
     status TEXT NOT NULL DEFAULT 'open' -- open | fixed | closed
   );
   CREATE INDEX IF NOT EXISTS problems_status ON problems (status, created_at);
+  CREATE TABLE IF NOT EXISTS email_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sent_at INTEGER NOT NULL,       -- ms
+    ref_kind TEXT NOT NULL,         -- problem | purchase | subscription | custom: what the email was about (/admin/email)
+    ref_id TEXT NOT NULL,           -- problems.id, purchases.session, subscriptions.subscription; '' for custom
+    to_hint TEXT NOT NULL,          -- the address, masked (j***@gmail.com): enough to tell sends apart, not to reuse
+    subject TEXT NOT NULL,
+    admin TEXT NOT NULL,            -- GitHub login of the admin who sent it
+    resend_id TEXT                  -- Resend's email id, to look it up in their dashboard
+  );
+  CREATE INDEX IF NOT EXISTS email_log_ref ON email_log (ref_kind, ref_id, sent_at);
   CREATE TABLE IF NOT EXISTS interest (
     feature TEXT NOT NULL,          -- a feature not built yet, e.g. "pdf", whose button only says "coming soon"
     day TEXT NOT NULL,              -- UTC date, YYYY-MM-DD
@@ -180,7 +191,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 7; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list
+const SCHEMA_VERSION = 8; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -1154,6 +1165,69 @@ export async function purchasesFor(githubId: number): Promise<Purchase[]> {
   });
 }
 
+// For /admin/email: what an email is about, so the template can name the repo and the plan.
+export async function purchaseBySession(session: string): Promise<(Purchase & { login: string | null }) | null> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({
+      sql: "SELECT p.*, u.login FROM purchases p LEFT JOIN users u ON u.github_id = p.github_id WHERE p.session = ?",
+      args: [session],
+    });
+    const r = rows[0];
+    if (!r) return null;
+    return {
+      session: String(r.session),
+      githubId: Number(r.github_id),
+      repo: String(r.repo),
+      fullName: String(r.full_name),
+      amount: Number(r.amount),
+      currency: String(r.currency),
+      paidAt: Number(r.paid_at),
+      login: r.login == null ? null : String(r.login),
+    };
+  });
+}
+
+export async function subscriptionById(subscription: string): Promise<(SubscriptionRow & { login: string | null }) | null> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({
+      sql: "SELECT s.*, u.login FROM subscriptions s LEFT JOIN users u ON u.github_id = s.github_id WHERE s.subscription = ?",
+      args: [subscription],
+    });
+    return rows.length ? { ...toSubscription(rows[0]), login: rows[0].login == null ? null : String(rows[0].login) } : null;
+  });
+}
+
+// Emails sent from /admin/email. The address is kept masked: enough to tell which one it went to.
+export type EmailRef = { kind: "problem" | "purchase" | "subscription" | "custom"; id: string };
+export type EmailSent = { id: number; sentAt: number; ref: EmailRef; toHint: string; subject: string; admin: string; resendId: string | null };
+
+export async function logEmail(e: Omit<EmailSent, "id" | "sentAt">): Promise<void> {
+  await strictly((c) =>
+    c.execute({
+      sql: "INSERT INTO email_log (sent_at, ref_kind, ref_id, to_hint, subject, admin, resend_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      args: [Date.now(), e.ref.kind, e.ref.id, e.toHint, e.subject, e.admin, e.resendId],
+    }),
+  );
+}
+
+export async function listEmails(ref?: EmailRef, max = 500): Promise<EmailSent[]> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({
+      sql: `SELECT * FROM email_log ${ref ? "WHERE ref_kind = ? AND ref_id = ?" : ""} ORDER BY sent_at DESC LIMIT ?`,
+      args: ref ? [ref.kind, ref.id, max] : [max],
+    });
+    return rows.map((r) => ({
+      id: Number(r.id),
+      sentAt: Number(r.sent_at),
+      ref: { kind: String(r.ref_kind) as EmailRef["kind"], id: String(r.ref_id) },
+      toHint: String(r.to_hint),
+      subject: String(r.subject),
+      admin: String(r.admin),
+      resendId: r.resend_id == null ? null : String(r.resend_id),
+    }));
+  });
+}
+
 export async function subscriptionFor(githubId: number): Promise<SubscriptionRow | null> {
   return strictly(async (c) => {
     const { rows } = await c.execute({ sql: "SELECT * FROM subscriptions WHERE github_id = ?", args: [githubId] });
@@ -1388,30 +1462,39 @@ export async function saveProblem(p: Omit<Problem, "id" | "createdAt" | "status"
   );
 }
 
+const toProblem = (r: Record<string, unknown>): Problem => ({
+  id: Number(r.id),
+  createdAt: Number(r.created_at),
+  repo: String(r.repo),
+  os: String(r.os),
+  kind: String(r.kind),
+  step: r.step == null ? null : Number(r.step),
+  stepTitle: r.step_title == null ? null : String(r.step_title),
+  message: String(r.message),
+  error: r.error == null ? null : String(r.error),
+  email: r.email == null ? null : String(r.email),
+  githubLogin: r.github_login == null ? null : String(r.github_login),
+  page: r.page == null ? null : String(r.page),
+  mode: String(r.mode ?? "manual"),
+  name: r.name == null ? null : String(r.name),
+  version: Number(r.version),
+  status: String(r.status) as ProblemStatus,
+});
+
 export async function listProblems(status: ProblemStatus | "all", max = 300): Promise<Problem[]> {
   return strictly(async (c) => {
     const { rows } = await c.execute({
       sql: `SELECT * FROM problems ${status === "all" ? "" : "WHERE status = ?"} ORDER BY created_at DESC LIMIT ?`,
       args: status === "all" ? [max] : [status, max],
     });
-    return rows.map((r) => ({
-      id: Number(r.id),
-      createdAt: Number(r.created_at),
-      repo: String(r.repo),
-      os: String(r.os),
-      kind: String(r.kind),
-      step: r.step == null ? null : Number(r.step),
-      stepTitle: r.step_title == null ? null : String(r.step_title),
-      message: String(r.message),
-      error: r.error == null ? null : String(r.error),
-      email: r.email == null ? null : String(r.email),
-      githubLogin: r.github_login == null ? null : String(r.github_login),
-      page: r.page == null ? null : String(r.page),
-      mode: String(r.mode ?? "manual"),
-      name: r.name == null ? null : String(r.name),
-      version: Number(r.version),
-      status: String(r.status) as ProblemStatus,
-    }));
+    return rows.map(toProblem);
+  });
+}
+
+export async function getProblem(id: number): Promise<Problem | null> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT * FROM problems WHERE id = ?", args: [id] });
+    return rows.length ? toProblem(rows[0]) : null;
   });
 }
 

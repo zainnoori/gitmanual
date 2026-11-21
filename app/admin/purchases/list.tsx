@@ -67,7 +67,7 @@ export function PurchasesAdmin() {
       <p>
         One-time repo purchases: <strong>{recent.length}</strong> in the last 30 days ({totals(recent)}), <strong>{real.length}</strong> in all (
         {totals(real)}){tests ? `, not counting ${tests} in test mode` : ""}. Amounts are before tax. Pro: <strong>{running.length}</strong> running ({plans("month")} monthly, {plans("year")} yearly).{" "}
-        <a href="/admin/users">Users</a> · <a href="/admin/chat">Chat stats</a>
+        <a href="/admin/users">Users</a> · <a href="/admin/chat">Chat stats</a> · <a href="/admin/email">Email</a>
       </p>
 
       <h2>One-time purchases</h2>
@@ -80,6 +80,9 @@ export function PurchasesAdmin() {
                 <th scope="col">Repo</th>
                 <th scope="col">Buyer</th>
                 <th scope="col">Amount</th>
+                <th scope="col">
+                  <span className="sr-only">Email</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -95,6 +98,11 @@ export function PurchasesAdmin() {
                   <td className="num">
                     {money(p.amount, p.currency)}
                     {isTest(p) ? " (test)" : ""}
+                  </td>
+                  <td>
+                    <a className="btn btn-sm" href={`/admin/email?kind=purchase&id=${encodeURIComponent(p.session)}`}>
+                      Email
+                    </a>
                   </td>
                 </tr>
               ))}
@@ -116,6 +124,9 @@ export function PurchasesAdmin() {
                 <th scope="col">Status</th>
                 <th scope="col">Paid until</th>
                 <th scope="col">Last change</th>
+                <th scope="col">
+                  <span className="sr-only">Email</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -131,6 +142,11 @@ export function PurchasesAdmin() {
                   </td>
                   <td>{date(s.periodEnd)}</td>
                   <td>{date(s.updatedAt)}</td>
+                  <td>
+                    <a className="btn btn-sm" href={`/admin/email?kind=subscription&id=${encodeURIComponent(s.subscription)}`}>
+                      Email
+                    </a>
+                  </td>
                 </tr>
               ))}
             </tbody>
