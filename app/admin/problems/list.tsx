@@ -26,6 +26,17 @@ export function ProblemsAdmin() {
   const [from, setFrom] = useState<From>("all");
   const [list, setList] = useState<Problem[] | null>(null);
   const [denied, setDenied] = useState(false);
+  const [repo, setRepo] = useState<string | null>(null);
+  const [kind, setKind] = useState("");
+  // Rebuild results per repo: "working", or what happened.
+  const [rebuilt, setRebuilt] = useState<Record<string, string>>({});
+
+  async function rebuild(r: string) {
+    setRebuilt((m) => ({ ...m, [r]: "working" }));
+    const res = await fetch("/api/admin/problems", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rebuild: r }) });
+    const j = await res.json().catch(() => ({}));
+    setRebuilt((m) => ({ ...m, [r]: res.ok ? `Rebuilt just now (manual v${j.version}). Check it, then reply.` : (j.error ?? "Couldn't rebuild it.") }));
+  }
 
   const load = (s: Show) =>
     fetch(`/api/admin/problems?status=${s}`, { cache: "no-store" }).then(async (r) => {
@@ -51,7 +62,8 @@ export function ProblemsAdmin() {
     );
 
   // The repos with the most reports in this list: where a manual (or a detection rule) most needs work.
-  const rows = list?.filter((p) => from === "all" || p.mode === from) ?? null;
+  const rows = list?.filter((p) => (from === "all" || p.mode === from) && (!repo || p.repo === repo) && (!kind || p.kind === kind)) ?? null;
+  const kinds = list ? [...new Set(list.map((p) => p.kind))].sort() : [];
   const top = list
     ? Object.entries(list.reduce<Record<string, number>>((m, p) => ((m[p.repo] = (m[p.repo] ?? 0) + 1), m), {}))
         .filter(([r, n]) => r && n > 1)
@@ -77,15 +89,48 @@ export function ProblemsAdmin() {
           ))}
         </div>
       </div>
-      {top.length > 0 && (
-        <p className="note">
-          Most reported: {top.map(([r, n], i) => (
-            <span key={r}>
-              {i > 0 && " · "}
-              <a href={`/${r}`}>{r}</a> ({n})
-            </span>
-          ))}
+      {kinds.length > 1 && (
+        <p>
+          <label>
+            Type:{" "}
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="">All types</option>
+              {kinds.map((k) => (
+                <option key={k} value={k}>
+                  {KIND_LABEL[k] ?? k}
+                </option>
+              ))}
+            </select>
+          </label>
         </p>
+      )}
+      {repo ? (
+        <p className="note">
+          Only <a href={`/${repo}`}>{repo}</a>.{" "}
+          <button type="button" className="link" onClick={() => setRepo(null)}>
+            Show every repo
+          </button>
+          {" · "}
+          <button type="button" className="link" disabled={rebuilt[repo] === "working"} onClick={() => rebuild(repo)}>
+            {rebuilt[repo] === "working" ? "Rebuilding…" : "Rebuild its manual"}
+          </button>
+          {rebuilt[repo] && rebuilt[repo] !== "working" && <small role="status"> {rebuilt[repo]}</small>}
+        </p>
+      ) : (
+        top.length > 0 && (
+          <p className="note">
+            Most reported (click to see only those):{" "}
+            {top.map(([r, n], i) => (
+              <span key={r}>
+                {i > 0 && " · "}
+                <button type="button" className="link" onClick={() => setRepo(r)}>
+                  {r}
+                </button>{" "}
+                ({n})
+              </span>
+            ))}
+          </p>
+        )
       )}
       {!rows ? (
         <p>Loading…</p>
@@ -110,6 +155,14 @@ export function ProblemsAdmin() {
                   <td>{when(p.createdAt)}</td>
                   <th scope="row">
                     {p.repo ? <a href={`/${p.repo}${p.os ? `/${OS_SLUG[p.os as OS]}` : ""}`}>{p.repo}</a> : p.mode === "contact" ? "Message" : "Site"}
+                    {p.repo && !repo && (
+                      <>
+                        {" "}
+                        <button type="button" className="link" onClick={() => setRepo(p.repo)} aria-label={`Only ${p.repo}`}>
+                          only these
+                        </button>
+                      </>
+                    )}
                     <br />
                     <small>
                       {p.os ? `${OS_LABEL[p.os as OS] ?? p.os} · v${p.version}` : p.page ? `from ${p.page}` : ""}
@@ -136,11 +189,7 @@ export function ProblemsAdmin() {
                     )}
                   </td>
                   <td>
-                    {p.githubLogin && (
-                      <a href={`https://github.com/${p.githubLogin}`} target="_blank" rel="noreferrer">
-                        @{p.githubLogin}
-                      </a>
-                    )}
+                    {p.githubLogin && <a href={`/admin/user?login=${encodeURIComponent(p.githubLogin)}`}>@{p.githubLogin}</a>}
                     {p.githubLogin && p.email && <br />}
                     {p.email && <a href={`mailto:${p.email}`}>{p.email}</a>}
                     {p.name && (
@@ -154,8 +203,28 @@ export function ProblemsAdmin() {
                     <a className="btn btn-sm em-row" href={`/admin/email?kind=problem&id=${p.id}`}>
                       {p.email ? "Reply" : "Email…"}
                     </a>
+                    {p.repliedAt && (
+                      <>
+                        <br />
+                        <small className="replied">Replied {when(p.repliedAt)}</small>
+                      </>
+                    )}
                   </td>
                   <td className="problems-act">
+                    {p.repo && (
+                      <>
+                        <button type="button" className="link" disabled={rebuilt[p.repo] === "working"} onClick={() => rebuild(p.repo)} title="Read the repo from GitHub again and save the new manual">
+                          {rebuilt[p.repo] === "working" ? "Rebuilding…" : "Rebuild manual"}
+                        </button>
+                        {rebuilt[p.repo] && rebuilt[p.repo] !== "working" && (
+                          <>
+                            <br />
+                            <small role="status">{rebuilt[p.repo]}</small>
+                          </>
+                        )}
+                        <br />
+                      </>
+                    )}
                     {p.status === "open" ? (
                       <>
                         <button className="btn btn-sm" onClick={() => mark(p, "fixed")}>

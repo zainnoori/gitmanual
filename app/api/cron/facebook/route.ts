@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { markHealth } from "@/lib/db";
 import { syncFacebook } from "@/lib/facebook";
 
 export const maxDuration = 300;
@@ -12,8 +13,11 @@ export async function GET(req: Request) {
   }
   try {
     // ?images=1 re-downloads the images of posts already saved.
-    return NextResponse.json(await syncFacebook({ images: new URL(req.url).searchParams.has("images") }));
+    const result = await syncFacebook({ images: new URL(req.url).searchParams.has("images") });
+    await markHealth("cron-facebook", true, JSON.stringify(result).slice(0, 200));
+    return NextResponse.json(result);
   } catch (e) {
+    await markHealth("cron-facebook", false, e instanceof Error ? e.message : String(e));
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
   }
 }

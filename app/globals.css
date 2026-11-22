@@ -706,8 +706,11 @@ code.flow-label { font: 600 var(--fs-meta)/1.4 var(--mono); background: none; bo
 .problems-text p { margin: 0; white-space: pre-wrap; }
 .problems-text pre { margin: 6px 0 0; padding: 8px 10px; max-height: 220px; overflow: auto; border-radius: 8px; background: var(--paper); font: var(--fs-meta)/1.45 var(--mono); white-space: pre-wrap; }
 .problems-act { white-space: nowrap; }
+.problems-act small { white-space: normal; display: inline-block; max-width: 220px; }
+.replied { color: var(--pencil); }
 .inbox-filters { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .problems-act .link { margin-left: 10px; }
+.problems-act > .link:first-child { margin-left: 0; }
 
 /* "Something wrong with this manual?" (app/report-problem.tsx) */
 .rp-dialog { width: min(600px, calc(100vw - 32px)); }
@@ -735,6 +738,40 @@ code.flow-label { font: 600 var(--fs-meta)/1.4 var(--mono); background: none; bo
 .rp-trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
 .rp-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .rp-foot small { color: var(--pencil); font-size: var(--fs-meta); }
+
+/* Admin pages: their own menu */
+.admin-nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 22px; padding: 0 0 14px; border-bottom: 1.5px solid var(--line); }
+.admin-nav a { padding: 5px 12px; border: 1.5px solid var(--line-strong); border-radius: 999px; font: var(--ui); font-size: var(--fs-meta); color: inherit; text-decoration: none; background: var(--sheet); }
+.admin-nav a:hover { border-color: var(--ink); }
+.admin-nav a[aria-current="page"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.admin-nav a:focus-visible { outline: 2px solid var(--wrench); outline-offset: 2px; }
+
+/* /admin: the overview */
+.doc-body .admin-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin: 0 0 28px; padding: 0; list-style: none; }
+.admin-tiles li { margin: 0; }
+.admin-tiles a { display: grid; gap: 2px; height: 100%; padding: 14px 16px; border: 1.5px solid var(--ink); border-radius: 12px; background: var(--sheet); color: inherit; text-decoration: none; transition: transform 0.12s, box-shadow 0.12s; }
+.admin-tiles a:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--ink); }
+.admin-tiles a:focus-visible { outline: 2px solid var(--wrench); outline-offset: 2px; }
+.admin-tiles a.hot { background: var(--wrench); }
+.admin-tile-value { font: 800 28px/1.1 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.admin-tile-label { font: var(--ui); font-size: var(--fs-meta); }
+.admin-tiles small { color: var(--pencil); font-size: var(--fs-meta); }
+.admin-tiles a.hot small { color: inherit; }
+.doc-body .admin-waiting { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.doc-body .admin-waiting li { margin: 0; display: flex; justify-content: space-between; align-items: start; gap: 16px; padding: 12px 14px; border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--sheet); }
+.admin-waiting small { color: var(--pencil); }
+.doc-body .admin-waiting p { margin: 4px 0 0; font-size: var(--fs-small); overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .admin-tiles a { transition: none; } }
+
+.admin-row-act { white-space: nowrap; }
+.admin-find { display: flex; gap: 8px; align-items: center; margin: 0 0 18px; }
+.admin-find input { padding: 7px 12px; border: 1.5px solid var(--line-strong); border-radius: 8px; background: var(--sheet); color: inherit; font: var(--fs-small)/1.4 var(--sans); }
+.admin-find input:focus { outline: none; border-color: var(--ink); box-shadow: 2px 2px 0 var(--ink); }
+
+.health-state { display: inline-block; padding: 2px 9px; border-radius: 999px; font: var(--ui); font-size: var(--fs-meta); border: 1.5px solid var(--ink); white-space: nowrap; }
+.health-state.ok { background: var(--yes); }
+.health-state.bad { background: #b42318; border-color: #b42318; color: #fff; }
+.health-state.off { background: var(--paper); border-color: var(--line-strong); color: var(--pencil); }
 
 /* /admin/email: write to one person */
 .em-form { display: grid; gap: 14px; max-width: 760px; margin-top: 12px; }

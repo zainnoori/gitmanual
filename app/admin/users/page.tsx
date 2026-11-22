@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DocPage } from "../../doc";
+import { AdminNav } from "../nav";
 import { UsersAdmin } from "./list";
 
 export const metadata: Metadata = { title: "Users (admin)", robots: { index: false, follow: false } };
@@ -8,6 +9,7 @@ export const metadata: Metadata = { title: "Users (admin)", robots: { index: fal
 export default function AdminUsers() {
   return (
     <DocPage eyebrow="Admin" title="Users" wide>
+      <AdminNav current="users" />
       <UsersAdmin />
     </DocPage>
   );

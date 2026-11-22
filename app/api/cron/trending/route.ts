@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hasRepo, markRising, repoKey } from "@/lib/db";
+import { hasRepo, markHealth, markRising, repoKey } from "@/lib/db";
 import { risingRepos, topicRepos } from "@/lib/github";
 import { SEED_THEMES } from "@/lib/lists";
 import { loadRepo } from "@/lib/pipeline";
@@ -35,6 +35,7 @@ export async function GET(req: Request) {
   try {
     candidates = await risingRepos(40);
   } catch (e) {
+    await markHealth("cron-trending", false, e instanceof Error ? e.message : String(e));
     return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 502 });
   }
 
@@ -79,5 +80,6 @@ export async function GET(req: Request) {
     }
   }
 
+  await markHealth("cron-trending", true, `${added.length} added, ${seeded.length} for ${theme?.id ?? "no theme"}, ${failed.length} failed`);
   return NextResponse.json({ candidates: candidates.length, known: knownCount, added, theme: theme?.id, seeded, failed });
 }

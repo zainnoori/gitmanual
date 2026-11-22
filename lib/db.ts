@@ -1,5 +1,6 @@
 import { createClient, type Client } from "@libsql/client";
 import { FACETS_VERSION, facetsOf } from "./facets";
+import { notifyDbTrouble } from "./notify";
 
 // Turso in production (TURSO_DATABASE_URL + TURSO_AUTH_TOKEN); a local SQLite file in development.
 // Without either (e.g. a Vercel deploy with no database yet) everything still works, just uncached.
@@ -142,6 +143,12 @@ const SCHEMA = `
     resend_id TEXT                  -- Resend's email id, to look it up in their dashboard
   );
   CREATE INDEX IF NOT EXISTS email_log_ref ON email_log (ref_kind, ref_id, sent_at);
+  CREATE TABLE IF NOT EXISTS health_marks (
+    name TEXT PRIMARY KEY,          -- stripe-webhook, cron-trending, cron-facebook, cron-digest, ... (/admin/health)
+    at INTEGER NOT NULL,            -- ms, the last time it ran
+    ok INTEGER NOT NULL,            -- 1 when that run worked
+    note TEXT                       -- a short result or error, for the health page
+  );
   CREATE TABLE IF NOT EXISTS interest (
     feature TEXT NOT NULL,          -- a feature not built yet, e.g. "pdf", whose button only says "coming soon"
     day TEXT NOT NULL,              -- UTC date, YYYY-MM-DD
@@ -192,7 +199,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 8; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log
+const SCHEMA_VERSION = 9; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -360,6 +367,7 @@ export async function saveConversation(id: string, messages: unknown[], answers:
 // DB_TIMEOUT_MS (a write still lands), but a busy database costs a visitor seconds, not the minute it used to
 // (2026-11-18: five 15-second waits in a row hit Vercel's 60-second limit).
 const PAGE_WAIT_MS = 5_000;
+const clipError = (e: unknown) => (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 160);
 
 // The database is a cache and a counter: if it fails or is slow, the request should still succeed.
 async function safely<T>(fallback: T, fn: (c: Client) => Promise<T>, waitMs = PAGE_WAIT_MS): Promise<T> {
@@ -367,6 +375,7 @@ async function safely<T>(fallback: T, fn: (c: Client) => Promise<T>, waitMs = PA
   if (!c) return fallback;
   const run = fn(c).catch((e) => {
     console.error("gitmanual db:", e);
+    notifyDbTrouble(clipError(e));
     return fallback;
   });
   if (!Number.isFinite(waitMs)) return run;
@@ -374,6 +383,7 @@ async function safely<T>(fallback: T, fn: (c: Client) => Promise<T>, waitMs = PA
   const late = new Promise<T>((resolve) => {
     timer = setTimeout(() => {
       console.error(`gitmanual db: no answer in ${waitMs / 1000} s, went on without it`);
+      notifyDbTrouble(`no answer in ${waitMs / 1000} s`);
       resolve(fallback);
     }, waitMs);
   });
@@ -1211,22 +1221,24 @@ export async function logEmail(e: Omit<EmailSent, "id" | "sentAt">): Promise<voi
   );
 }
 
+const toEmailSent = (r: Record<string, unknown>): EmailSent => ({
+  id: Number(r.id),
+  sentAt: Number(r.sent_at),
+  ref: { kind: String(r.ref_kind) as EmailRef["kind"], id: String(r.ref_id) },
+  toHint: String(r.to_hint),
+  fromAddress: r.from_address == null ? null : String(r.from_address),
+  subject: String(r.subject),
+  admin: String(r.admin),
+  resendId: r.resend_id == null ? null : String(r.resend_id),
+});
+
 export async function listEmails(ref?: EmailRef, max = 500): Promise<EmailSent[]> {
   return strictly(async (c) => {
     const { rows } = await c.execute({
       sql: `SELECT * FROM email_log ${ref ? "WHERE ref_kind = ? AND ref_id = ?" : ""} ORDER BY sent_at DESC LIMIT ?`,
       args: ref ? [ref.kind, ref.id, max] : [max],
     });
-    return rows.map((r) => ({
-      id: Number(r.id),
-      sentAt: Number(r.sent_at),
-      ref: { kind: String(r.ref_kind) as EmailRef["kind"], id: String(r.ref_id) },
-      toHint: String(r.to_hint),
-      fromAddress: r.from_address == null ? null : String(r.from_address),
-      subject: String(r.subject),
-      admin: String(r.admin),
-      resendId: r.resend_id == null ? null : String(r.resend_id),
-    }));
+    return rows.map(toEmailSent);
   });
 }
 
@@ -1452,16 +1464,19 @@ export type Problem = {
   name: string | null;
   version: number;
   status: ProblemStatus;
+  repliedAt: number | null; // the last email sent about it from /admin/email
 };
 
-export async function saveProblem(p: Omit<Problem, "id" | "createdAt" | "status">): Promise<void> {
-  await strictly((c) =>
+// The new report's id.
+export async function saveProblem(p: Omit<Problem, "id" | "createdAt" | "status" | "repliedAt">): Promise<number> {
+  const r = await strictly((c) =>
     c.execute({
       sql: `INSERT INTO problems (created_at, mode, repo, os, kind, step, step_title, name, message, error, email, github_login, page, version)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [Date.now(), p.mode, p.repo, p.os, p.kind, p.step, p.stepTitle, p.name, p.message, p.error, p.email, p.githubLogin, p.page, p.version],
     }),
   );
+  return Number(r.lastInsertRowid ?? 0);
 }
 
 const toProblem = (r: Record<string, unknown>): Problem => ({
@@ -1481,12 +1496,14 @@ const toProblem = (r: Record<string, unknown>): Problem => ({
   name: r.name == null ? null : String(r.name),
   version: Number(r.version),
   status: String(r.status) as ProblemStatus,
+  repliedAt: r.replied_at == null ? null : Number(r.replied_at),
 });
+const REPLIED = "(SELECT MAX(sent_at) FROM email_log e WHERE e.ref_kind = 'problem' AND e.ref_id = CAST(problems.id AS TEXT)) AS replied_at";
 
 export async function listProblems(status: ProblemStatus | "all", max = 300): Promise<Problem[]> {
   return strictly(async (c) => {
     const { rows } = await c.execute({
-      sql: `SELECT * FROM problems ${status === "all" ? "" : "WHERE status = ?"} ORDER BY created_at DESC LIMIT ?`,
+      sql: `SELECT *, ${REPLIED} FROM problems ${status === "all" ? "" : "WHERE status = ?"} ORDER BY created_at DESC LIMIT ?`,
       args: status === "all" ? [max] : [status, max],
     });
     return rows.map(toProblem);
@@ -1495,11 +1512,184 @@ export async function listProblems(status: ProblemStatus | "all", max = 300): Pr
 
 export async function getProblem(id: number): Promise<Problem | null> {
   return strictly(async (c) => {
-    const { rows } = await c.execute({ sql: "SELECT * FROM problems WHERE id = ?", args: [id] });
+    const { rows } = await c.execute({ sql: `SELECT *, ${REPLIED} FROM problems WHERE id = ?`, args: [id] });
     return rows.length ? toProblem(rows[0]) : null;
+  });
+}
+
+// For a user's page on /admin: what they reported while signed in.
+export async function problemsByLogin(login: string, max = 100): Promise<Problem[]> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({
+      sql: `SELECT *, ${REPLIED} FROM problems WHERE github_login = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT ?`,
+      args: [login, max],
+    });
+    return rows.map(toProblem);
   });
 }
 
 export async function setProblemStatus(id: number, status: ProblemStatus): Promise<void> {
   await strictly((c) => c.execute({ sql: "UPDATE problems SET status = ? WHERE id = ?", args: [status, id] }));
+}
+
+// ---- /admin home and /admin/health ----
+
+// When a background part last ran (the Stripe webhook, the cron jobs). Never in the way: a failed write is only logged.
+export function markHealth(name: string, ok: boolean, note?: string): Promise<void> {
+  return safely(undefined, async (c) => {
+    await c.execute({
+      sql: "INSERT INTO health_marks (name, at, ok, note) VALUES (?, ?, ?, ?) ON CONFLICT (name) DO UPDATE SET at = excluded.at, ok = excluded.ok, note = excluded.note",
+      args: [name, Date.now(), ok ? 1 : 0, note?.slice(0, 300) ?? null],
+    });
+  });
+}
+
+export type HealthMark = { name: string; at: number; ok: boolean; note: string | null };
+export async function healthMarks(): Promise<HealthMark[]> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute("SELECT * FROM health_marks ORDER BY name");
+    return rows.map((r) => ({ name: String(r.name), at: Number(r.at), ok: Boolean(Number(r.ok)), note: r.note == null ? null : String(r.note) }));
+  });
+}
+
+// How long the database takes to answer a trivial query, in ms.
+export async function dbPing(): Promise<number> {
+  const t = Date.now();
+  await strictly((c) => c.execute("SELECT 1"));
+  return Date.now() - t;
+}
+
+export type AdminOverview = {
+  openProblems: number;
+  unanswered: number; // open, and no email sent about it yet
+  purchases7d: { count: number; totals: { currency: string; cents: number }[] };
+  proRunning: number;
+  users: number;
+  newUsers7d: number;
+  emails7d: number;
+  chatSpendToday: number; // dollars
+  attention: { id: number; createdAt: number; repo: string; kind: string; mode: string; message: string; hasEmail: boolean; login: string | null }[];
+};
+
+const RUNNING_SQL = "status IN ('active', 'trialing', 'past_due') AND period_end > ?";
+
+export async function adminOverview(now = Date.now()): Promise<AdminOverview> {
+  return strictly(async (c) => {
+    const week = now - 7 * 864e5;
+    const one = async (sql: string, args: (string | number)[] = []) => Number((await c.execute({ sql, args })).rows[0]?.n ?? 0);
+    const unansweredSql = "status = 'open' AND NOT EXISTS (SELECT 1 FROM email_log e WHERE e.ref_kind = 'problem' AND e.ref_id = CAST(problems.id AS TEXT))";
+    const [openProblems, unanswered, proRunning, users, newUsers7d, emails7d] = await Promise.all([
+      one("SELECT COUNT(*) AS n FROM problems WHERE status = 'open'"),
+      one(`SELECT COUNT(*) AS n FROM problems WHERE ${unansweredSql}`),
+      one(`SELECT COUNT(*) AS n FROM subscriptions WHERE ${RUNNING_SQL}`, [now]),
+      one("SELECT COUNT(*) AS n FROM users"),
+      one("SELECT COUNT(*) AS n FROM users WHERE first_seen >= ?", [week]),
+      one("SELECT COUNT(*) AS n FROM email_log WHERE sent_at >= ?", [week]),
+    ]);
+    // Test-mode checkouts (cs_test_) are left out, as on /admin/purchases.
+    const bought = await c.execute({
+      sql: "SELECT currency, COUNT(*) AS n, SUM(amount) AS cents FROM purchases WHERE paid_at >= ? AND session NOT LIKE 'cs\\_test\\_%' ESCAPE '\\' GROUP BY currency",
+      args: [week],
+    });
+    const spend = await c.execute({
+      sql: "SELECT COALESCE(SUM(COALESCE(cost, reserved)), 0) AS m FROM chat_spend WHERE day = ?",
+      args: [new Date(now).toISOString().slice(0, 10)],
+    });
+    const att = await c.execute(
+      `SELECT id, created_at, repo, kind, mode, substr(message, 1, 200) AS message, email IS NOT NULL AS has_email, github_login FROM problems
+       WHERE ${unansweredSql} ORDER BY created_at ASC LIMIT 10`,
+    );
+    return {
+      openProblems,
+      unanswered,
+      purchases7d: {
+        count: bought.rows.reduce((n, r) => n + Number(r.n), 0),
+        totals: bought.rows.map((r) => ({ currency: String(r.currency), cents: Number(r.cents) })),
+      },
+      proRunning,
+      users,
+      newUsers7d,
+      emails7d,
+      chatSpendToday: Number(spend.rows[0]?.m ?? 0) / 1e6,
+      attention: att.rows.map((r) => ({
+        id: Number(r.id),
+        createdAt: Number(r.created_at),
+        repo: String(r.repo),
+        kind: String(r.kind),
+        mode: String(r.mode ?? "manual"),
+        message: String(r.message),
+        hasEmail: Boolean(Number(r.has_email)),
+        login: r.github_login == null ? null : String(r.github_login),
+      })),
+    };
+  });
+}
+
+// Everything on one person, for /admin/user. Null when the GitHub id isn't a user here and never bought anything.
+export async function userById(githubId: number): Promise<{ githubId: number; login: string | null; firstSeen: number | null; lastSeen: number | null; signIns: number } | null> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT * FROM users WHERE github_id = ?", args: [githubId] });
+    const r = rows[0];
+    if (!r) return null;
+    return { githubId, login: String(r.login), firstSeen: Number(r.first_seen), lastSeen: Number(r.last_seen), signIns: Number(r.sign_ins) };
+  });
+}
+
+export async function githubIdForLogin(login: string): Promise<number | null> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT github_id FROM users WHERE login = ? COLLATE NOCASE", args: [login] });
+    return rows.length ? Number(rows[0].github_id) : null;
+  });
+}
+
+// Emails sent about any of these (a user's problems, purchases and subscription).
+export async function emailsAbout(refs: EmailRef[], max = 200): Promise<EmailSent[]> {
+  if (!refs.length) return [];
+  const keys = [...new Set(refs.map((r) => `${r.kind}:${r.id}`))].slice(0, 500);
+  return strictly(async (c) => {
+    const { rows } = await c.execute({
+      sql: `SELECT * FROM email_log WHERE ref_kind || ':' || ref_id IN (${keys.map(() => "?").join(", ")}) ORDER BY sent_at DESC LIMIT ?`,
+      args: [...keys, max],
+    });
+    return rows.map(toEmailSent);
+  });
+}
+
+// The daily summary email (app/api/cron/digest): what came in since `since`.
+export async function sinceNumbers(since: number): Promise<{ problems: number; purchases: number; totals: { currency: string; cents: number }[]; newUsers: number }> {
+  return strictly(async (c) => {
+    const n = async (sql: string) => Number((await c.execute({ sql, args: [since] })).rows[0]?.n ?? 0);
+    const [problems, newUsers] = await Promise.all([n("SELECT COUNT(*) AS n FROM problems WHERE created_at >= ?"), n("SELECT COUNT(*) AS n FROM users WHERE first_seen >= ?")]);
+    const bought = await c.execute({
+      sql: "SELECT currency, COUNT(*) AS n, SUM(amount) AS cents FROM purchases WHERE paid_at >= ? AND session NOT LIKE 'cs\\_test\\_%' ESCAPE '\\' GROUP BY currency",
+      args: [since],
+    });
+    return {
+      problems,
+      purchases: bought.rows.reduce((t, r) => t + Number(r.n), 0),
+      totals: bought.rows.map((r) => ({ currency: String(r.currency), cents: Number(r.cents) })),
+      newUsers,
+    };
+  });
+}
+
+// A user's chat in the last 14 days, for /admin/user.
+export async function chatUsageFor(githubId: number, now = Date.now()): Promise<{ answers: number; spent: number; repos: { repo: string; answers: number }[] }> {
+  return strictly(async (c) => {
+    const since = new Date(now - 13 * 864e5).toISOString().slice(0, 10);
+    const args = [String(githubId), since];
+    const total = await c.execute({
+      sql: "SELECT COUNT(*) AS n, COALESCE(SUM(COALESCE(cost, reserved)), 0) AS m FROM chat_spend WHERE pool IN ('user', 'pro') AND account = ? AND day >= ?",
+      args,
+    });
+    const repos = await c.execute({
+      sql: "SELECT repo, COUNT(*) AS n FROM chat_spend WHERE pool IN ('user', 'pro') AND account = ? AND day >= ? AND repo IS NOT NULL GROUP BY repo ORDER BY n DESC LIMIT 10",
+      args,
+    });
+    return {
+      answers: Number(total.rows[0]?.n ?? 0),
+      spent: Number(total.rows[0]?.m ?? 0) / 1e6,
+      repos: repos.rows.map((r) => ({ repo: String(r.repo), answers: Number(r.n) })),
+    };
+  });
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DocPage } from "../../doc";
+import { AdminNav } from "../nav";
 import { ChatAdmin } from "./stats";
 
 export const metadata: Metadata = { title: "Chat (admin)", robots: { index: false, follow: false } };
@@ -8,6 +9,7 @@ export const metadata: Metadata = { title: "Chat (admin)", robots: { index: fals
 export default function AdminChat() {
   return (
     <DocPage eyebrow="Admin" title="Chat" wide>
+      <AdminNav current="chat" />
       <ChatAdmin />
     </DocPage>
   );

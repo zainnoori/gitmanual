@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DocPage } from "../../doc";
+import { AdminNav } from "../nav";
 import { ProblemsAdmin } from "./list";
 
 export const metadata: Metadata = { title: "Inbox (admin)", robots: { index: false, follow: false } };
@@ -9,6 +10,7 @@ export const metadata: Metadata = { title: "Inbox (admin)", robots: { index: fal
 export default function AdminProblems() {
   return (
     <DocPage eyebrow="Admin" title="Inbox" lead="Contact messages and problem reports, newest first." wide>
+      <AdminNav current="problems" />
       <ProblemsAdmin />
     </DocPage>
   );

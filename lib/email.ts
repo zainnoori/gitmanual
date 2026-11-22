@@ -12,7 +12,7 @@ const FROM = () => process.env.EMAIL_FROM || "gitmanual <hello@gitmanual.com>";
 const REPLY_TO = () => process.env.EMAIL_REPLY_TO || "hello@gitmanual.com";
 export const EMAIL_ENABLED = () => Boolean(process.env.RESEND_API_KEY);
 
-type Mail = { to: string; subject: string; text: string; html: string; key: string; from?: Sender };
+export type Mail = { to: string; subject: string; text: string; html: string; key: string; from?: Sender };
 
 // "Name <address>" → its parts; null when the setting isn't one address on its own.
 export type Sender = { name: string; address: string; value: string };
@@ -27,7 +27,7 @@ export const brandSender = (): Sender => sender(FROM()) ?? { name: "gitmanual", 
 export const personalSender = (): Sender | null => sender(process.env.EMAIL_FROM_PERSONAL);
 
 // Resend's id for the email, or null when it wasn't sent (the reason is logged).
-async function deliver(m: Mail): Promise<string | null> {
+export async function deliver(m: Mail): Promise<string | null> {
   const key = process.env.RESEND_API_KEY;
   if (!key) return null;
   const res = await fetch("https://api.resend.com/emails", {

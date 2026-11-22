@@ -187,9 +187,11 @@ export function EmailAdmin({ kind, id }: { kind: string; id: string }) {
 
   return (
     <>
-      <p>
-        <a href="/admin/problems">Problems</a> · <a href="/admin/purchases">Purchases</a> · <a href="/admin/email">New email</a>
-      </p>
+      {ctx.ref.kind !== "custom" && (
+        <p>
+          <a href="/admin/email">Write a new email instead</a>
+        </p>
+      )}
       {!enabled && (
         <p role="alert">
           Sending is off on this server: <code>RESEND_API_KEY</code> isn&apos;t set. You can still write and preview.

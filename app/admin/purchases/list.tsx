@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { AdminPurchase, AdminSubscription } from "@/lib/db";
+import { stripePurchaseUrl, stripeSubscriptionUrl } from "@/lib/stripe-links";
 
 const date = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 const money = (cents: number, currency: string) => {
@@ -18,14 +19,12 @@ const totals = (list: AdminPurchase[]) => {
   return by.size ? [...by].map(([cur, cents]) => money(cents, cur)).join(" + ") : money(0, "usd");
 };
 
-const Buyer = ({ login, githubId }: { login: string | null; githubId: number }) =>
-  login ? (
-    <a href={`https://github.com/${login}`} target="_blank" rel="noreferrer">
-      @{login}
-    </a>
-  ) : (
-    <span title="Not in the users table">GitHub #{githubId}</span>
-  );
+// Their page on /admin, with everything else about them.
+const Buyer = ({ login, githubId }: { login: string | null; githubId: number }) => (
+  <a href={`/admin/user?id=${githubId}`} title={login ? undefined : "Not in the users table"}>
+    {login ? `@${login}` : `GitHub #${githubId}`}
+  </a>
+);
 
 const RUNNING = new Set(["active", "trialing", "past_due"]);
 // Stripe test mode (test keys) makes cs_test_ sessions: shown, tagged, and left out of the totals.
@@ -67,7 +66,9 @@ export function PurchasesAdmin() {
       <p>
         One-time repo purchases: <strong>{recent.length}</strong> in the last 30 days ({totals(recent)}), <strong>{real.length}</strong> in all (
         {totals(real)}){tests ? `, not counting ${tests} in test mode` : ""}. Amounts are before tax. Pro: <strong>{running.length}</strong> running ({plans("month")} monthly, {plans("year")} yearly).{" "}
-        <a href="/admin/users">Users</a> · <a href="/admin/chat">Chat stats</a> · <a href="/admin/email">Email</a>
+        <a href="/api/admin/purchases?format=csv" download>
+          Download purchases as CSV
+        </a>
       </p>
 
       <h2>One-time purchases</h2>
@@ -99,9 +100,12 @@ export function PurchasesAdmin() {
                     {money(p.amount, p.currency)}
                     {isTest(p) ? " (test)" : ""}
                   </td>
-                  <td>
+                  <td className="admin-row-act">
                     <a className="btn btn-sm" href={`/admin/email?kind=purchase&id=${encodeURIComponent(p.session)}`}>
                       Email
+                    </a>{" "}
+                    <a href={stripePurchaseUrl(p.session)} target="_blank" rel="noreferrer">
+                      Stripe
                     </a>
                   </td>
                 </tr>
@@ -142,9 +146,12 @@ export function PurchasesAdmin() {
                   </td>
                   <td>{date(s.periodEnd)}</td>
                   <td>{date(s.updatedAt)}</td>
-                  <td>
+                  <td className="admin-row-act">
                     <a className="btn btn-sm" href={`/admin/email?kind=subscription&id=${encodeURIComponent(s.subscription)}`}>
                       Email
+                    </a>{" "}
+                    <a href={stripeSubscriptionUrl(s.subscription)} target="_blank" rel="noreferrer">
+                      Stripe
                     </a>
                   </td>
                 </tr>

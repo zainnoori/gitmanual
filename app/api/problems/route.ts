@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { saveProblem } from "@/lib/db";
 import { limit, LimitError, limitHeaders, visitor } from "@/lib/limit";
+import { notifyProblem } from "@/lib/notify";
 import { checkProblem } from "@/lib/problems";
 import { viewer } from "@/lib/viewer";
 
@@ -23,7 +24,10 @@ export async function POST(req: Request) {
   }
   const { user, settle } = await viewer();
   try {
-    await saveProblem({ ...p, githubLogin: user?.login ?? null });
+    const githubLogin = user?.login ?? null;
+    const id = await saveProblem({ ...p, githubLogin });
+    // An email to the admins (ADMIN_EMAIL) once the visitor has their answer.
+    after(() => notifyProblem({ ...p, id, githubLogin }));
   } catch (e) {
     console.error("gitmanual problem report:", e);
     return settle(NextResponse.json({ error: "Couldn't send it just now. Try again in a minute." }, { status: 503, headers }));

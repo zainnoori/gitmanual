@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { DocPage } from "../../doc";
+import { AdminNav } from "../nav";
 import { EmailAdmin } from "./compose";
 
 export const metadata: Metadata = { title: "Email (admin)", robots: { index: false, follow: false } };
@@ -11,6 +12,7 @@ export default async function AdminEmail({ searchParams }: { searchParams: Promi
   const one = (v: string | string[] | undefined) => (typeof v === "string" ? v : "");
   return (
     <DocPage eyebrow="Admin" title="Email" wide>
+      <AdminNav current="email" />
       <EmailAdmin kind={one(q.kind) || "custom"} id={one(q.id)} />
     </DocPage>
   );

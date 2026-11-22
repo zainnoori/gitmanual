@@ -41,8 +41,7 @@ export function UsersAdmin() {
     <>
       <p>
         <strong>{users.length.toLocaleString()}</strong> {users.length === 1 ? "user" : "users"}: {newThisWeek} new and {activeThisWeek} active in
-        the last 7 days; {pro} on Pro. Answers and repos are from the last 14 days. <a href="/admin/chat">Chat stats</a> ·{" "}
-        <a href="/admin/keys">API keys</a> · <a href="/admin/purchases">Purchases</a>
+        the last 7 days; {pro} on Pro. Answers and repos are from the last 14 days.
       </p>
       <p>
         <input
@@ -72,9 +71,7 @@ export function UsersAdmin() {
             {shown.map((u) => (
               <tr key={u.githubId}>
                 <th scope="row">
-                  <a href={`https://github.com/${u.login}`} target="_blank" rel="noreferrer">
-                    @{u.login}
-                  </a>
+                  <a href={`/admin/user?id=${u.githubId}`}>@{u.login}</a>
                 </th>
                 <td>{date(u.firstSeen)}</td>
                 <td>{date(u.lastSeen)}</td>

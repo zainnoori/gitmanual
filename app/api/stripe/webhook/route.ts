@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type Stripe from "stripe";
+import { markHealth } from "@/lib/db";
 import { sendProWelcome, sendReportThanks } from "@/lib/email";
+import { notifyPurchase, notifySubscription } from "@/lib/notify";
 import { recordPurchase, syncSubscription } from "@/lib/pro";
 import { PRO_ENABLED, stripe, WEBHOOK_EVENTS as EVENTS } from "@/lib/stripe";
 
@@ -25,7 +27,10 @@ export async function POST(req: Request) {
       const githubId = Number(s.client_reference_id);
       if (s.mode === "subscription" && s.subscription && Number.isSafeInteger(githubId) && githubId > 0) {
         const sub = await syncSubscription(typeof s.subscription === "string" ? s.subscription : s.subscription.id, githubId);
-        if (sub) await thank(s, (to) => sendProWelcome({ to, plan: sub.plan, session: s.id, live: event.livemode }));
+        if (sub) {
+          await thank(s, (to) => sendProWelcome({ to, plan: sub.plan, session: s.id, live: event.livemode }));
+          await notifySubscription({ subscription: sub.subscription, plan: sub.plan, login: s.metadata?.github_login }, event.livemode);
+        }
       }
       // A one-time repo report (app/api/pro/report). recordPurchase checks it's ours and paid.
       if (s.mode === "payment") await reportPaid(s, event.livemode);
@@ -37,14 +42,18 @@ export async function POST(req: Request) {
   } catch (e) {
     // A 500 makes Stripe send the event again later.
     console.error("gitmanual stripe webhook:", e);
+    await markHealth("stripe-webhook", false, `${event.type}: ${e instanceof Error ? e.message : String(e)}`);
     return NextResponse.json({ error: "Couldn't record it." }, { status: 500 });
   }
+  await markHealth("stripe-webhook", true, event.type);
   return NextResponse.json({ received: true });
 }
 
 async function reportPaid(s: Stripe.Checkout.Session, live: boolean) {
   const p = await recordPurchase(s);
-  if (p) await thank(s, (to) => sendReportThanks({ to, fullName: p.fullName, session: s.id, live }));
+  if (!p) return;
+  await thank(s, (to) => sendReportThanks({ to, fullName: p.fullName, session: s.id, live }));
+  await notifyPurchase({ ...p, login: s.metadata?.github_login }, live);
 }
 
 // The thank-you goes to the email given at checkout. It's sent only after the payment is recorded, and a failed
