@@ -1431,8 +1431,9 @@ button.fb-media { width: 100%; padding: 0; border: 0; border-block: 1.5px solid 
   .pro-preview { margin-top: 48px; padding: 22px; }
 }
 
-/* "Download PDF manual" under "Before you start", and its dialog (app/report.tsx DownloadManual) */
+/* "Download the step-by-step guide" under "Before you start", and its dialog (app/report.tsx DownloadManual) */
 .dl-toggle { margin-top: 14px; min-height: 40px; border-radius: 10px; gap: 9px; }
+.dl-sub { display: block; margin-top: 6px; color: var(--pencil); font-size: var(--fs-meta); }
 .dl-systems { display: inline-flex; padding: 3px; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--paper); }
 .dl-systems button { border: 0; background: none; border-radius: 999px; padding: 5px 12px; font: var(--ui); font-size: var(--fs-meta); cursor: pointer; }
 .dl-systems button.on { background: var(--ink); color: var(--sheet); }
@@ -2002,6 +2003,13 @@ a.insp-teaser:hover { border-color: var(--ink); box-shadow: 4px 4px 0 var(--ink)
 .insp-locked-more { justify-self: start; font: var(--ui); color: var(--wrench-2); text-decoration: none; }
 .insp-locked-more:hover { text-decoration: underline; }
 .insp-locked-hi { margin: 0 0 -4px; color: var(--pencil); font: 600 var(--fs-meta) var(--sans); }
+.insp-checklist { display: grid; gap: 7px; font: 600 var(--fs-small)/1.3 var(--sans); }
+.insp-checklist > span { display: flex; align-items: center; gap: 9px; }
+.insp-q { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1.5px dashed var(--line-strong); border-radius: 5px; color: var(--pencil); font: 700 var(--fs-meta)/1 var(--mono); }
+/* Under the steps: what the saved Deep Inspection found (app/report.tsx InspectionNudge) */
+.insp-nudge { display: flex; gap: 10px; align-items: flex-start; margin: 16px 0 0; padding: 12px 14px; border: 1.5px solid var(--ink); border-radius: 10px; background: var(--sheet); box-shadow: var(--hard); font-size: var(--fs-small); line-height: 1.45; }
+.insp-nudge svg { flex: none; margin-top: 2px; }
+.insp-nudge a { font-weight: 700; color: var(--wrench-2); white-space: nowrap; }
 .insp-teaser-pitch { font: 600 var(--fs-small)/1.4 var(--sans); }
 
 /* ── The manual on a phone: the answer first ────────────────────────────────────────────────────────────────────────

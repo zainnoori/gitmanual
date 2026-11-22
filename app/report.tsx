@@ -507,7 +507,7 @@ function Report({
             )}
           </div>
           <BeforeYouStart facts={beforeYouStart(result)} />
-          {!priv && <DownloadManual repo={meta.fullName} os={os} />}
+          {!priv && <DownloadManual repo={meta.fullName} os={os} steps={steps.length} />}
         </div>
         <div className="head-side">
           <dl className="spec">
@@ -748,6 +748,7 @@ function Report({
                   </li>
                 ))}
               </ol>
+              {inspection && !priv && steps.length > 1 && <InspectionNudge repo={meta.fullName} />}
               {a.osNotes[os].map((n) => (
                 <p className="tip" key={n}>
                   <ReactMarkdown components={inline}>{n}</ReactMarkdown>
@@ -1258,7 +1259,7 @@ function GuideButton({ status, loading, written, onGuide, page }: { status: Guid
   );
 }
 
-// "Download PDF manual": a dialog that shows what the PDF holds and who it's for, lets you pick a system (and
+// "Download the step-by-step guide" (the PDF manual): a dialog that shows what the PDF holds and who it's for, lets you pick a system (and
 // remember it in this browser), then gives the right next step: the PDF or Markdown for Pro, sign in or Get Pro for
 // everyone else. While Pro is off on the site, the PDF says "coming soon". Every PDF press
 // by someone without Pro is counted (app/api/interest) for the demand numbers on /admin/chat. #pdf in the URL opens
@@ -1276,7 +1277,7 @@ const PDF_INSIDE: { icon: string; title: string }[] = [
 ];
 const PDF_FOR = ["Offline setup", "Onboarding", "Client handover", "Workshops"];
 
-function DownloadManual({ repo, os }: { repo: string; os: OS }) {
+function DownloadManual({ repo, os, steps }: { repo: string; os: OS; steps: number }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [system, setSystem] = useState<OS>(os);
   const [remember, setRemember] = useState(false);
@@ -1343,8 +1344,12 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
   return (
     <>
       <button type="button" className="btn dl-toggle" onClick={open} aria-haspopup="dialog">
-        <PdfIcon /> Download PDF manual
+        <PdfIcon /> Download the step-by-step guide
       </button>
+      <small className="dl-sub">
+        PDF for {OS_LABEL[os]}
+        {steps > 1 && <> · {steps} steps</>} · works offline
+      </small>
       <dialog
         ref={dialog}
         className="contact pdf-dialog"
@@ -1355,7 +1360,7 @@ function DownloadManual({ repo, os }: { repo: string; os: OS }) {
         <div className="contact-box">
           <div className="contact-head">
             <div>
-              <h2 id="pdf-h">Your setup manual for {name}</h2>
+              <h2 id="pdf-h">Take {name}&apos;s setup offline</h2>
               <p>A printable PDF of this page, made for one system. Also as Markdown.</p>
             </div>
             <button type="button" className="contact-close" onClick={() => dialog.current?.close()} aria-label="Close">
@@ -1543,6 +1548,7 @@ function InspectionFree({ repo, t, signedIn }: { repo: string; t: Teaser; signed
   const segs = (["blocker", "important", "improvement", "pass"] as const).filter((b) => t.counts[b] > 0);
   const label = (b: (typeof segs)[number]) => BUCKETS.find((x) => x.id === b)!.short.toLowerCase();
   const locked = t.locked.length + t.more;
+  const found = t.counts.blocker + t.counts.important + t.counts.improvement;
   return (
     <section className="side-card insp-preview insp-free" aria-labelledby="insp-strip-h">
       <p className="insp-preview-top">
@@ -1550,8 +1556,15 @@ function InspectionFree({ repo, t, signedIn }: { repo: string; t: Teaser; signed
       </p>
       <h2 id="insp-strip-h" className={`insp-preview-call v-${t.tone}`}>
         <SevIcon kind={t.tone === "no" ? "blocker" : t.tone === "maybe" ? "important" : "pass"} size={18} />
-        {t.title}
+        {found > 0 ? (
+          <span>
+            We found <strong>{found} {found === 1 ? "thing" : "things"}</strong> to know before you install
+          </span>
+        ) : (
+          t.title
+        )}
       </h2>
+      {found > 0 && <p className="insp-preview-counts">Verdict: {t.title}</p>}
       <div className="insp-strip-bar">
         <div className="insp-sevbar small" role="img" aria-label={segs.map((b) => `${t.counts[b]} ${label(b)}`).join(", ")}>
           {segs.map((b) => (
@@ -1589,6 +1602,29 @@ function InspectionFree({ repo, t, signedIn }: { repo: string; t: Teaser; signed
   );
 }
 
+// What the empty card asks, as a checklist nobody has ticked yet (the full list: INSPECTION_CHECKS).
+const TEASER_CHECKS = ["Missing setup steps", "Hidden settings", "Version conflicts", "Exposed keys", "License risk"];
+
+// Under the steps, on a repo with a saved report the visitor hasn't unlocked: the report's own numbers, never made up.
+// Nothing when it found no concerns, or for Pro and buyers (their card shows the report).
+function InspectionNudge({ repo }: { repo: string }) {
+  const state = useSavedInspection(repo);
+  const t = state?.teaser;
+  if (!t || state.pro || state.bought) return null;
+  const { blocker, important } = t.counts;
+  if (!blocker && !important) return null;
+  return (
+    <p className="insp-nudge">
+      <SevIcon kind={blocker ? "blocker" : "important"} />
+      <span>
+        That&apos;s the setup the README gives. Deep Inspection ran <strong>{t.checks} more checks</strong> on this repo:{" "}
+        {blocker ? `${blocker} could stop your install.` : `${important} worth knowing first.`}{" "}
+        <Link href={`/${repo}/inspection`}>See what →</Link>
+      </span>
+    </p>
+  );
+}
+
 // The same card, greyed out, for anyone without a report to show: a sketch of what the preview holds (no real
 // findings, those are Pro). Pro or bought: the whole card leads to the inspection page; otherwise its button opens
 // the Deep Inspection dialog (app/inspect-dialog.tsx).
@@ -1598,35 +1634,34 @@ function InspectionTeaser({ repo, pro, signedIn }: { repo: string; pro: boolean;
       <p className="insp-preview-top">
         <span className="insp-pro">Pro</span> Deep Inspection
       </p>
-      <strong className="insp-teaser-title">What the README leaves out</strong>
-      <span className="insp-preview-counts">Check for missing setup steps, undocumented settings, license concerns, exposed secrets, and known dependency vulnerabilities.</span>
-      <span className="insp-sevbar small" aria-hidden="true">
-        <span className="sb-seg" style={{ flexGrow: 1 }} />
-        <span className="sb-seg" style={{ flexGrow: 3 }} />
-        <span className="sb-seg" style={{ flexGrow: 8 }} />
+      <strong className="insp-teaser-title">Before you install: {TEASER_CHECKS.length} things the README won&apos;t tell you</strong>
+      <span className="insp-checklist" role="list">
+        {TEASER_CHECKS.map((c) => (
+          <span role="listitem" key={c}>
+            <span className="insp-q" aria-label="Not checked yet">
+              ?
+            </span>
+            {c}
+          </span>
+        ))}
       </span>
-      <span className="insp-teaser-lines" aria-hidden="true">
-        <i style={{ width: "86%" }} />
-        <i style={{ width: "64%" }} />
-        <i style={{ width: "74%" }} />
-      </span>
-      <span className="insp-teaser-pitch">See what needs attention before you invest time in this repo.</span>
+      <span className="insp-teaser-pitch">Find out before you spend an hour setting it up.</span>
     </>
   );
   if (pro)
     return (
       <Link className="side-card insp-preview insp-teaser" href={`/${repo}/inspection`} aria-label="Inspect this repo with Deep Inspection">
         {body}
-        <span className="btn insp-preview-go">Inspect this repo →</span>
+        <span className="btn insp-preview-go">Run the {TEASER_CHECKS.length} checks →</span>
       </Link>
     );
   return (
     <section className="side-card insp-preview insp-teaser">
       {body}
-      <span className="insp-preview-counts">{REPO_PRICE} once for this repo with its PDF manuals, or with Pro.</span>
       <InspectDialog repo={repo} signedIn={signedIn} teaser={null} className="btn insp-preview-go">
-        Unlock Deep Inspection →
+        Run the {TEASER_CHECKS.length} checks · {REPO_PRICE}
       </InspectDialog>
+      <span className="insp-preview-counts">Once for this repo, PDF guides included. Or every repo with Pro.</span>
     </section>
   );
 }

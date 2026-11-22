@@ -169,7 +169,7 @@ export function SavedList() {
     return (
       <div className="panel saved-empty">
         <h2>Nothing saved yet</h2>
-        <p className="note">Press Save on any manual, next to &ldquo;Download PDF manual&rdquo;, and it shows up here.</p>
+        <p className="note">Press Save on any manual, next to &ldquo;Download the step-by-step guide&rdquo;, and it shows up here.</p>
         <Link className="btn btn-go" href="/shelf">
           Browse the shelf
         </Link>
