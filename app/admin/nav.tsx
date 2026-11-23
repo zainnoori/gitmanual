@@ -5,6 +5,7 @@ const PAGES = [
   { id: "purchases", href: "/admin/purchases", label: "Purchases" },
   { id: "users", href: "/admin/users", label: "Users" },
   { id: "email", href: "/admin/email", label: "Email" },
+  { id: "repos", href: "/admin/repos", label: "Repos" },
   { id: "chat", href: "/admin/chat", label: "Chat" },
   { id: "keys", href: "/admin/keys", label: "API keys" },
   { id: "health", href: "/admin/health", label: "Health" },

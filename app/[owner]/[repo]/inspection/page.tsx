@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { repoHidden, repoKey } from "@/lib/db";
 import { PRO_ENABLED } from "@/lib/stripe";
 import { InspectionView } from "../../../inspection";
 
@@ -23,5 +24,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function InspectionPage({ params }: Props) {
   const { owner, repo } = await params;
   if (!PRO_ENABLED() || !GITHUB_OWNER.test(owner) || !GITHUB_REPO.test(repo)) notFound();
+  if (await repoHidden(repoKey(owner, repo))) notFound(); // taken down by an admin (/admin/repos)
   return <InspectionView repo={`${owner}/${repo}`} />;
 }

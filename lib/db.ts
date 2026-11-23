@@ -149,6 +149,14 @@ const SCHEMA = `
     ok INTEGER NOT NULL,            -- 1 when that run worked
     note TEXT                       -- a short result or error, for the health page
   );
+  CREATE TABLE IF NOT EXISTS repo_gone (
+    key TEXT PRIMARY KEY,           -- lower-case owner/repo (covers its branch views too)
+    full_name TEXT NOT NULL,
+    reason TEXT NOT NULL,           -- github: GitHub said it's gone on a re-read | hidden: an admin took the manual down
+    at INTEGER NOT NULL,            -- ms
+    note TEXT,                      -- why (hidden), or GitHub's answer (github)
+    by TEXT                         -- GitHub login of the admin who hid it
+  );
   CREATE TABLE IF NOT EXISTS interest (
     feature TEXT NOT NULL,          -- a feature not built yet, e.g. "pdf", whose button only says "coming soon"
     day TEXT NOT NULL,              -- UTC date, YYYY-MM-DD
@@ -199,7 +207,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 9; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks
+const SCHEMA_VERSION = 10; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks, 10: repo_gone
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -394,22 +402,99 @@ export function repoKey(owner: string, repo: string, ref?: string): string {
   return `${owner}/${repo}`.toLowerCase() + (ref ? `@${ref}` : "");
 }
 
-// Whether a repo is on the shelf, without loading its manual.
+// Whether a repo is on the shelf, without loading its manual. A manual an admin took down isn't.
 export function hasRepo(key: string): Promise<boolean> {
-  return safely(false, async (c) => (await c.execute({ sql: "SELECT 1 FROM repos WHERE key = ?", args: [key] })).rows.length > 0);
+  return safely(
+    false,
+    async (c) =>
+      (
+        await c.execute({
+          sql: "SELECT 1 FROM repos WHERE key = ? AND NOT EXISTS (SELECT 1 FROM repo_gone WHERE key IN (?, ?) AND reason = 'hidden')",
+          args: [key, key, baseKey(key)],
+        })
+      ).rows.length > 0,
+  );
 }
 
 export async function getCached(key: string): Promise<{ data: unknown; analyzedAt: number } | null> {
-  const saved = await readSaved(key);
-  return saved === "error" ? null : saved;
+  const read = await readSaved(key);
+  return read === "error" || read.gone?.reason === "hidden" ? null : read.saved;
 }
 
-// The saved manual, or "error" when the database didn't answer: loadRepo then builds the page without saving it,
-// instead of adding a big write to a database that's already struggling.
-export function readSaved(key: string): Promise<{ data: unknown; analyzedAt: number } | null | "error"> {
-  return safely<{ data: unknown; analyzedAt: number } | null | "error">("error", async (c) => {
-    const { rows } = await c.execute({ sql: "SELECT data, analyzed_at FROM repos WHERE key = ?", args: [key] });
-    return rows[0] ? { data: JSON.parse(String(rows[0].data)), analyzedAt: Number(rows[0].analyzed_at) } : null;
+// ---- Repos gone from GitHub, or taken down by an admin (/admin/repos) ----
+// Kept apart from repos so the shelf queries still read only the repos_shelf index (a column on repos would make them
+// read every manual). Either kind is off the shelf, lists, suggestions and sitemap. "github": a re-read found the repo
+// gone (deleted, private, or its owner's account hidden); the manual still shows, with a notice, and a later re-read
+// that works clears it. "hidden": the manual is gone from gitmanual until an admin brings it back.
+export type GoneReason = "github" | "hidden";
+export type GoneMark = { reason: GoneReason; at: number; note: string | null };
+export type GoneRepo = GoneMark & { key: string; fullName: string; by: string | null };
+const baseKey = (key: string) => key.split("@")[0];
+
+// The saved manual and any gone mark (its own or, for a branch view, the repo's), or "error" when the database
+// didn't answer: loadRepo then builds the page without saving it, instead of adding a big write to a database
+// that's already struggling.
+export function readSaved(key: string): Promise<{ saved: { data: unknown; analyzedAt: number } | null; gone: GoneMark | null } | "error"> {
+  return safely<{ saved: { data: unknown; analyzedAt: number } | null; gone: GoneMark | null } | "error">("error", async (c) => {
+    const { rows } = await c.execute({
+      sql: `SELECT r.data, r.analyzed_at, g.reason, g.at AS gone_at, g.note
+            FROM (SELECT 1) LEFT JOIN repos r ON r.key = ?
+            LEFT JOIN (SELECT reason, at, note FROM repo_gone WHERE key IN (?, ?) ORDER BY reason = 'hidden' DESC LIMIT 1) g`,
+      args: [key, key, baseKey(key)],
+    });
+    const row = rows[0];
+    return {
+      saved: row && row.data != null ? { data: JSON.parse(String(row.data)), analyzedAt: Number(row.analyzed_at) } : null,
+      gone: row && row.reason != null ? { reason: String(row.reason) as GoneReason, at: Number(row.gone_at), note: row.note == null ? null : String(row.note) } : null,
+    };
+  });
+}
+
+// Taken down by an admin: its inspection page and report are gone too. False when the database doesn't answer.
+export function repoHidden(key: string): Promise<boolean> {
+  return safely(false, async (c) => (await c.execute({ sql: "SELECT 1 FROM repo_gone WHERE key = ? AND reason = 'hidden'", args: [baseKey(key)] })).rows.length > 0);
+}
+
+// GitHub said the repo is gone. Never overwrites an admin's "hidden".
+export function markGoneFromGitHub(key: string, fullName: string, note: string): Promise<void> {
+  facetCache = null;
+  return safely(undefined, async (c) => {
+    await c.execute({
+      sql: `INSERT INTO repo_gone (key, full_name, reason, at, note) VALUES (?, ?, 'github', ?, ?)
+            ON CONFLICT (key) DO UPDATE SET at = excluded.at, note = excluded.note WHERE repo_gone.reason = 'github'`,
+      args: [baseKey(key), fullName, Date.now(), note.slice(0, 300)],
+    });
+  });
+}
+
+export async function hideRepo(key: string, fullName: string, note: string | null, by: string): Promise<void> {
+  facetCache = null;
+  await strictly((c) =>
+    c.execute({
+      sql: `INSERT INTO repo_gone (key, full_name, reason, at, note, by) VALUES (?, ?, 'hidden', ?, ?, ?)
+            ON CONFLICT (key) DO UPDATE SET full_name = excluded.full_name, reason = 'hidden', at = excluded.at, note = excluded.note, by = excluded.by`,
+      args: [baseKey(key), fullName, Date.now(), note?.slice(0, 300) || null, by],
+    }),
+  );
+}
+
+// Back on the shelf (either kind). A repo still gone from GitHub is marked again on its next re-read.
+export async function unhideRepo(key: string): Promise<void> {
+  facetCache = null;
+  await strictly((c) => c.execute({ sql: "DELETE FROM repo_gone WHERE key = ?", args: [baseKey(key)] }));
+}
+
+export async function goneRepos(): Promise<GoneRepo[]> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute("SELECT * FROM repo_gone ORDER BY reason = 'hidden' DESC, at DESC LIMIT 500");
+    return rows.map((r) => ({
+      key: String(r.key),
+      fullName: String(r.full_name),
+      reason: String(r.reason) as GoneReason,
+      at: Number(r.at),
+      note: r.note == null ? null : String(r.note),
+      by: r.by == null ? null : String(r.by),
+    }));
   });
 }
 
@@ -432,6 +517,8 @@ export async function saveRepo(
           args: [key, r.fullName, r.description, r.stars, r.language, r.difficulty, JSON.stringify(data), now, now, facetsOf(data as Parameters<typeof facetsOf>[0])],
         },
         { sql: "DELETE FROM guides WHERE key = ?", args: [key] },
+        // Read from GitHub just now, so it isn't gone (an admin's "hidden" stays).
+        { sql: "DELETE FROM repo_gone WHERE key = ? AND reason = 'github'", args: [baseKey(key)] },
       ],
       "write",
     ),
@@ -501,7 +588,7 @@ export function markRising(key: string): Promise<unknown> {
 // How many repos are rising this week, for "See all N on the shelf".
 export function countRising(): Promise<number> {
   return safely(0, async (c) => {
-    const { rows } = await c.execute({ sql: "SELECT COUNT(*) AS n FROM repos WHERE key NOT LIKE '%@%' AND rising_at > ?", args: [Date.now() - 7 * 864e5] });
+    const { rows } = await c.execute({ sql: "SELECT COUNT(*) AS n FROM repos WHERE key NOT LIKE '%@%' AND key NOT IN (SELECT key FROM repo_gone) AND rising_at > ?", args: [Date.now() - 7 * 864e5] });
     return Number(rows[0]?.n ?? 0);
   });
 }
@@ -512,7 +599,7 @@ export function listRepos(order: "recent" | "popular" | "rising", limit = 6): Pr
       sql: `SELECT r.full_name, r.description, r.stars, r.language, r.difficulty, r.views, r.analyzed_at, r.rising_at,
                    r.worked, r.stuck
             FROM repos r
-            WHERE r.key NOT LIKE '%@%' ${order === "rising" ? "AND r.rising_at > ?" : ""}
+            WHERE r.key NOT LIKE '%@%' AND r.key NOT IN (SELECT key FROM repo_gone) ${order === "rising" ? "AND r.rising_at > ?" : ""}
             ORDER BY ${order === "recent" ? "r.last_viewed" : order === "rising" ? "r.stars" : "r.views + 3 * r.worked"} DESC
             LIMIT ?`,
       args: order === "rising" ? [Date.now() - 7 * 864e5, limit] : [limit],
@@ -571,7 +658,7 @@ export function ensureFacets(maxRows = 400): Promise<number> {
 // Repos whose facets include every token in `all` and at least one in `any`, most-starred first.
 export function facetRepos(q: { all: string[]; any?: string[]; difficulty?: string; limit?: number }): Promise<RepoCard[]> {
   return safely([], async (c) => {
-    const where = ["r.key NOT LIKE '%@%'", ...q.all.map(() => "r.facets LIKE ?")];
+    const where = ["r.key NOT LIKE '%@%' AND r.key NOT IN (SELECT key FROM repo_gone)", ...q.all.map(() => "r.facets LIKE ?")];
     const args: (string | number)[] = q.all.map((t) => `% ${t} %`);
     if (q.any?.length) {
       where.push(`(${q.any.map(() => "r.facets LIKE ?").join(" OR ")})`);
@@ -620,7 +707,7 @@ function loadFacetIndex(): Promise<FacetIndex | null> {
   facetLoad ??= safely<FacetIndex | null>(
     null,
     async (c) => {
-      const { rows } = await c.execute("SELECT key, full_name, description, stars, language, difficulty, rising_at, facets FROM repos WHERE key NOT LIKE '%@%'");
+      const { rows } = await c.execute("SELECT key, full_name, description, stars, language, difficulty, rising_at, facets FROM repos WHERE key NOT LIKE '%@%' AND key NOT IN (SELECT key FROM repo_gone)");
       const list: FacetRow[] = rows.map((r) => ({
         key: String(r.key),
         fullName: String(r.full_name),
@@ -724,7 +811,7 @@ export function browseRepos(
   query: ShelfQuery,
 ): Promise<{ repos: RepoCard[]; total: number; languages: { name: string; count: number }[]; all: number; rising: number }> {
   return safely({ repos: [], total: 0, languages: [], all: 0, rising: 0 }, async (c) => {
-    const where = ["r.key NOT LIKE '%@%'"];
+    const where = ["r.key NOT LIKE '%@%' AND r.key NOT IN (SELECT key FROM repo_gone)"];
     const args: (string | number)[] = [];
     if (query.q) {
       where.push("(r.full_name LIKE ? OR r.description LIKE ?)");
@@ -835,9 +922,9 @@ async function shelfTotals(c: Client, weekAgo: number): Promise<ShelfTotals> {
   }
   if (totalsCache && Date.now() - totalsCache.at < 300e3) return totalsCache.value;
   const value = Promise.all([
-    c.execute("SELECT language, COUNT(*) AS n FROM repos WHERE key NOT LIKE '%@%' AND language IS NOT NULL GROUP BY language ORDER BY n DESC, language"),
+    c.execute("SELECT language, COUNT(*) AS n FROM repos WHERE key NOT LIKE '%@%' AND key NOT IN (SELECT key FROM repo_gone) AND language IS NOT NULL GROUP BY language ORDER BY n DESC, language"),
     // The whole shelf and this week's rising repos, for the All / Rising switch.
-    c.execute({ sql: "SELECT COUNT(*) AS n, COALESCE(SUM(rising_at > ?), 0) AS rising FROM repos WHERE key NOT LIKE '%@%'", args: [weekAgo] }),
+    c.execute({ sql: "SELECT COUNT(*) AS n, COALESCE(SUM(rising_at > ?), 0) AS rising FROM repos WHERE key NOT LIKE '%@%' AND key NOT IN (SELECT key FROM repo_gone)", args: [weekAgo] }),
   ]).then(([langs, rising]) => ({
     languages: langs.rows.map((r) => ({ name: String(r.language), count: Number(r.n) })),
     all: Number(rising.rows[0]?.n ?? 0),
@@ -852,7 +939,7 @@ async function shelfTotals(c: Client, weekAgo: number): Promise<ShelfTotals> {
 export function sitemapRepos(limit = 45000): Promise<{ fullName: string; analyzedAt: number }[]> {
   return safely([], async (c) => {
     const { rows } = await c.execute({
-      sql: "SELECT full_name, analyzed_at FROM repos WHERE key NOT LIKE '%@%' ORDER BY views DESC, stars DESC LIMIT ?",
+      sql: "SELECT full_name, analyzed_at FROM repos WHERE key NOT LIKE '%@%' AND key NOT IN (SELECT key FROM repo_gone) ORDER BY views DESC, stars DESC LIMIT ?",
       args: [limit],
     });
     return rows.map((r) => ({ fullName: String(r.full_name), analyzedAt: Number(r.analyzed_at) }));
@@ -928,7 +1015,7 @@ export function fbImage(id: string): Promise<{ bytes: ArrayBuffer; type: string 
 // Only names that belong to exactly one repo.
 export function shelfNames(): Promise<Map<string, string>> {
   return safely(new Map<string, string>(), async (c) => {
-    const rows = (await c.execute("SELECT full_name FROM repos WHERE key NOT LIKE '%@%'")).rows.map((r) => String(r.full_name));
+    const rows = (await c.execute("SELECT full_name FROM repos WHERE key NOT LIKE '%@%' AND key NOT IN (SELECT key FROM repo_gone)")).rows.map((r) => String(r.full_name));
     const byName = new Map<string, string[]>();
     for (const full of rows) {
       // "lossless-cut", "LosslessCut" and "losslesscut" are the same name.

@@ -1,6 +1,6 @@
 import { analyze, inFolder, mainSubfolder, presentPaths, selectFiles, type Analysis } from "./detect";
 import { after } from "next/server";
-import { CACHE_MS, countView, readSaved, repoKey, saveRepo } from "./db";
+import { CACHE_MS, countView, markGoneFromGitHub, readSaved, repoKey, saveRepo } from "./db";
 import { getFiles, getHeadSha, getLatestRelease, getRepoMeta, getTree, GitHubError, type RepoMeta, type RepoRef } from "./github";
 import { findDocsLink, findDownloadPage, findSetupDocs, findSetupScripts, type Guides, type SetupDoc } from "./guides";
 import { announceRepo } from "./indexnow";
@@ -22,7 +22,16 @@ export type RepoData = {
   files: Record<string, string>;
 };
 
-export type Loaded = { key: string; data: RepoData; analyzedAt: number; cached: boolean; stale?: boolean };
+// gone: when a re-read found the repo gone from GitHub (the saved manual is shown with a notice).
+export type Loaded = { key: string; data: RepoData; analyzedAt: number; cached: boolean; stale?: boolean; gone?: number };
+
+// A manual an admin took down (/admin/repos): every page, API and download treats it as not there.
+export const REMOVED = "This manual was removed from gitmanual.";
+
+// GitHub's answer for the repo itself (not a branch or file in it): gone, private to us, or blocked for legal reasons.
+// Only these mark a manual as gone; rate limits and outages never do.
+class GoneError extends GitHubError {}
+const goneFrom = (e: unknown) => e instanceof GoneError;
 
 // A view is counted after the page has been sent: it's a write to the database's primary (and to every index on
 // views), and the visitor shouldn't wait for it. Outside a request (scripts, tests) it's counted right away.
@@ -44,12 +53,15 @@ export async function loadRepo(
   opts: { fresh?: boolean; view?: boolean; bot?: boolean; gate?: () => Promise<void> } = {},
 ): Promise<Loaded> {
   const lookup = repoKey(ref.owner, ref.repo, ref.ref);
-  const saved = await readSaved(lookup);
+  const read = await readSaved(lookup);
+  if (read !== "error" && read.gone?.reason === "hidden") throw new GitHubError(REMOVED, 410);
+  const saved = read === "error" ? "error" : read.saved;
+  const gone = read === "error" ? undefined : read.gone?.at;
   const cached = saved && saved !== "error" && (saved.data as RepoData).version === VERSION ? saved : null;
   if (cached && !opts.fresh) {
     if (!opts.bot && Date.now() - cached.analyzedAt >= CACHE_MS) refreshLater(ref, lookup, opts.gate);
     if (opts.view) viewed(lookup);
-    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true };
+    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, gone };
   }
 
   try {
@@ -62,22 +74,29 @@ export async function loadRepo(
     return loaded;
   } catch (err) {
     // GitHub is down or rate-limited, or the visitor is over a limit: an older saved copy beats an error page.
+    // Gone from GitHub (rebuild marked it): the saved copy, with a notice instead of "GitHub didn't answer".
     if (!cached) throw err;
     if (opts.view) viewed(lookup);
-    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, stale: true };
+    if (goneFrom(err)) return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, gone: Date.now() };
+    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, stale: true, gone };
   }
 }
 
 async function readPublic(ref: RepoRef): Promise<RepoData> {
   const data = await analyzeRepo(ref);
   // The site's own token may be able to see private repos (its owner's); those never go on the public shelf.
-  if (data.meta.private) throw new GitHubError("Repository not found (or it is private).", 404);
+  if (data.meta.private) throw new GoneError("Repository not found (or it is private).", 404);
   return data;
 }
 
 // Reads the repo from GitHub and saves it. isNew: it wasn't on the shelf before.
+// A repo GitHub says is gone is marked (off the shelf, with a notice on its manual) when it was on the shelf: this
+// is the only check, on re-reads people start or that a visit to an old manual starts (no daily job, to save GitHub calls).
 async function rebuild(ref: RepoRef, isNew: boolean): Promise<Loaded> {
-  const data = await readPublic(ref);
+  const data = await readPublic(ref).catch(async (e) => {
+    if (goneFrom(e) && !isNew) await markGoneFromGitHub(repoKey(ref.owner, ref.repo), `${ref.owner}/${ref.repo}`, `GitHub answered ${(e as GoneError).status}`);
+    throw e;
+  });
   const [owner, name] = data.meta.fullName.split("/");
   const key = repoKey(owner, name, ref.ref);
   const { meta, analysis } = data;
@@ -122,7 +141,11 @@ export async function loadPrivate(ref: RepoRef, token: string): Promise<{ data: 
 }
 
 async function analyzeRepo(ref: RepoRef, token?: string): Promise<RepoData> {
-  const meta = await getRepoMeta(ref, token);
+  const meta = await getRepoMeta(ref, token).catch((e) => {
+    // Read with the site's access, a 404 or 451 is about the repo: deleted, private, its owner hidden, or blocked.
+    if (!token && e instanceof GitHubError && (e.status === 404 || e.status === 451)) throw new GoneError(e.message, e.status);
+    throw e;
+  });
   const branch = ref.ref ?? meta.defaultBranch;
   const [{ entries, truncated }, rawRelease, commit] = await Promise.all([
     getTree(ref, branch, token),

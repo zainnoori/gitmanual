@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { allowance } from "@/lib/budget";
-import { countInterest } from "@/lib/db";
+import { countInterest, repoHidden, repoKey } from "@/lib/db";
 import { firstTime, visitor } from "@/lib/limit";
 import { parseRepoUrl } from "@/lib/github";
 import { inspect, InspectionError, saved } from "@/lib/inspection";
 import { teaser } from "@/lib/inspection/labels";
 import { accessFor } from "@/lib/pro";
+import { REMOVED } from "@/lib/pipeline";
 import { PRO_ENABLED } from "@/lib/stripe";
 import { viewer } from "@/lib/viewer";
 
@@ -29,6 +30,7 @@ async function who(repo: string) {
 export async function GET(req: Request) {
   const ref = parseRepoUrl(new URL(req.url).searchParams.get("repo") ?? "");
   if (!ref) return NextResponse.json({ error: "Expected ?repo=owner/name" }, { status: 400, headers });
+  if (await repoHidden(repoKey(ref.owner, ref.repo))) return NextResponse.json({ error: REMOVED }, { status: 404, headers });
   const { user, pro, bought, settle } = await who(`${ref.owner}/${ref.repo}`);
   if (!pro && !bought) {
     if (user && new URL(req.url).searchParams.has("view") && PRO_ENABLED()) {
@@ -48,6 +50,7 @@ export async function POST(req: Request) {
   const { repo, rescan } = (await req.json().catch(() => ({}))) as { repo?: string; rescan?: boolean };
   const ref = repo ? parseRepoUrl(repo) : null;
   if (!ref) return NextResponse.json({ error: "Expected { repo }" }, { status: 400, headers });
+  if (await repoHidden(repoKey(ref.owner, ref.repo))) return NextResponse.json({ error: REMOVED }, { status: 404, headers });
   const { user, pro, bought, settle } = await who(`${ref.owner}/${ref.repo}`);
   if (!user) return settle(NextResponse.json({ error: "Sign in with GitHub to use Deep Inspection.", signIn: true }, { status: 401, headers }));
   if (!pro && !bought) return settle(NextResponse.json({ error: "Deep Inspection is part of GitManual Pro.", pro: false }, { status: 402, headers }));

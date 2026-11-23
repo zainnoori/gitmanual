@@ -47,7 +47,7 @@ const getRepo = cache(async (owner: string, repo: string, ref?: string): Promise
   try {
     const bot = BOTS.test(ua);
     const l = await loadRepo({ owner, repo: name, ref }, { view: !bot, bot, gate: analyzeGate(h) });
-    return { data: { ...l.data, analyzedAt: l.analyzedAt, cached: l.cached, stale: l.stale, votes: await (l.key === key ? votes : getVotes(l.key)) } as ReportData };
+    return { data: { ...l.data, analyzedAt: l.analyzedAt, cached: l.cached, stale: l.stale, gone: l.gone, votes: await (l.key === key ? votes : getVotes(l.key)) } as ReportData };
   } catch (e) {
     return e instanceof GitHubError ? { error: e.message, status: e.status } : { error: "Failed to analyze repository.", status: 500 };
   }
@@ -100,6 +100,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const osPage = await osPageOf(params);
   const { ref, os: qOs } = await searchParams;
   const r = await getRepo(owner, repo, ref);
+  if ("error" in r && r.status === 410) notFound(); // taken down by an admin (/admin/repos)
   if ("error" in r) return { title: `${owner}/${repo}`, robots: { index: false } };
   const { meta } = r.data;
   const name = meta.fullName.split("/")[1];
@@ -115,8 +116,8 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
     // Named here because the per-system pages have no image file of their own, and this openGraph would hide the repo's.
     openGraph: { title, description, type: "article", url: canonical, images: [{ url: `/${meta.fullName}/opengraph-image`, width: 1200, height: 630, alt: `Setup manual for ${meta.fullName}` }] },
     twitter: { card: "summary_large_image", title, description, images: [`/${meta.fullName}/opengraph-image`] },
-    // Branch views (?ref=) are variants of the main page.
-    robots: ref ? { index: false, follow: true } : undefined,
+    // Branch views (?ref=) are variants of the main page. Gone from GitHub: kept for whoever has the link, not for search.
+    robots: r.data.gone ? { index: false, follow: false } : ref ? { index: false, follow: true } : undefined,
   };
 }
 
@@ -129,6 +130,7 @@ export async function RepoManual({ params, searchParams }: Props) {
   // Started with the manual rather than after it (it's another database read); a renamed repo is redirected below.
   const picks = picksFor(`${owner}/${repo.replace(/\.git$/, "")}`).catch(() => []);
   const r = await getRepo(owner, repo, ref);
+  if ("error" in r && r.status === 410) notFound();
 
   // One URL per repo: send renamed repos and other spellings (case, .git) to the canonical name.
   if ("data" in r && r.data.meta.fullName !== `${owner}/${repo}`) {

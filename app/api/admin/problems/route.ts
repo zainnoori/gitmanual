@@ -31,6 +31,11 @@ export async function POST(req: Request) {
     if (!m || m[2] === "." || m[2] === "..") return NextResponse.json({ error: "That isn't owner/repo." }, { status: 400, headers: NO_STORE });
     try {
       const loaded = await loadRepo({ owner: m[1], repo: m[2] }, { fresh: true });
+      if (loaded.gone)
+        return NextResponse.json(
+          { error: "GitHub says this repo is gone (deleted, private, or its owner's account removed). It's off the shelf now; see Repos to take it down." },
+          { status: 502, headers: NO_STORE },
+        );
       return NextResponse.json({ ok: true, version: VERSION, analyzedAt: loaded.analyzedAt, saved: !loaded.cached }, { headers: NO_STORE });
     } catch (e) {
       return NextResponse.json({ error: `Couldn't rebuild it: ${e instanceof Error ? e.message : String(e)}` }, { status: 502, headers: NO_STORE });

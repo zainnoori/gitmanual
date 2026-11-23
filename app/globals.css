@@ -597,6 +597,7 @@ details[open].panel > summary h3::after { content: " −"; }
 @keyframes contact-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
 
 /* Start here: the ways into a repo */
+.gone-line { margin: 14px 0 0; padding: 10px 14px; border: 1.5px solid var(--ink); border-left-width: 6px; border-left-color: var(--no); border-radius: 10px; background: color-mix(in srgb, var(--no) 10%, var(--sheet)); font-size: var(--fs-small); line-height: 1.5; }
 .stamp-line { margin: 14px 0 0; font: var(--fs-meta) var(--mono); color: var(--pencil); display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
 /* "Before you start": one compact strip of quick answers, a colored dot for yes / maybe / no */

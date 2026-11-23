@@ -58,6 +58,7 @@ type Result = {
   analyzedAt: number;
   cached: boolean;
   stale?: boolean;
+  gone?: number; // when a re-read found the repo gone from GitHub (lib/pipeline.ts)
   votes: Votes;
   version?: number; // the analysis version (lib/pipeline.ts)
 };
@@ -557,6 +558,14 @@ function Report({
           </button>
         </p>
       ) : (
+      <>
+      {result.gone && (
+        <p className="gone-line" role="note">
+          <b>This repo is no longer on GitHub.</b> We found it gone {timeAgo(result.gone)}: it was deleted, made private, or its
+          owner&apos;s account was removed. This is the last copy we read, so its links and downloads may not work. Don&apos;t
+          install files from copies of it you find elsewhere unless you trust who made them.
+        </p>
+      )}
       <p className="stamp-line">
         {result.stale ? "GitHub didn't answer, so this is the saved copy from " : result.cached ? "Saved setup from " : "Fresh setup, read "}
         {timeAgo(result.analyzedAt)}
@@ -566,6 +575,7 @@ function Report({
           </button>
         )}
       </p>
+      </>
       )}
 
       <section className={`fit fit-${fit.status}`} aria-labelledby="fit-h">

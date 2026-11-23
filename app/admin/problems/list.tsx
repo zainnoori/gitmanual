@@ -223,6 +223,10 @@ export function ProblemsAdmin() {
                           </>
                         )}
                         <br />
+                        <a className="link" href={`/admin/repos?repo=${encodeURIComponent(p.repo)}`}>
+                          Take down…
+                        </a>
+                        <br />
                       </>
                     )}
                     {p.status === "open" ? (
