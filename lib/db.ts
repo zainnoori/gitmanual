@@ -19,7 +19,8 @@ export type RepoCard = {
   risingAt: number | null; // when the trending job last found it rising
 };
 
-export type Votes = { worked: number; stuck: number; byOs: Record<string, { worked: number; stuck: number }> };
+// saves: how many people have it saved (not dropped), for the manual's header; read with the votes in one round trip.
+export type Votes = { worked: number; stuck: number; byOs: Record<string, { worked: number; stuck: number }>; saves?: number };
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS repos (
@@ -579,16 +580,20 @@ export function addVote(key: string, os: string, worked: boolean): Promise<unkno
 }
 
 export function getVotes(key: string): Promise<Votes> {
-  return safely({ worked: 0, stuck: 0, byOs: {} }, async (c) => {
-    const { rows } = await c.execute({
-      sql: "SELECT os, SUM(worked) AS w, COUNT(*) - SUM(worked) AS s FROM votes WHERE key = ? GROUP BY os",
-      args: [key],
-    });
-    const list = rows.map((r) => ({ os: String(r.os), w: Number(r.w), s: Number(r.s) }));
+  return safely<Votes>({ worked: 0, stuck: 0, byOs: {} }, async (c) => {
+    const [votes, saves] = await c.batch(
+      [
+        { sql: "SELECT os, SUM(worked) AS w, COUNT(*) - SUM(worked) AS s FROM votes WHERE key = ? GROUP BY os", args: [key] },
+        { sql: "SELECT COUNT(*) AS n FROM saves WHERE key = ? AND status <> 'dropped'", args: [key] },
+      ],
+      "read",
+    );
+    const list = votes.rows.map((r) => ({ os: String(r.os), w: Number(r.w), s: Number(r.s) }));
     return {
       worked: list.reduce((n, r) => n + r.w, 0),
       stuck: list.reduce((n, r) => n + r.s, 0),
       byOs: Object.fromEntries(list.map((r) => [r.os, { worked: r.w, stuck: r.s }])),
+      saves: Number(saves.rows[0]?.n ?? 0),
     };
   });
 }

@@ -67,7 +67,7 @@ type Result = {
   version?: number; // the analysis version (lib/pipeline.ts)
 };
 
-type Votes = { worked: number; stuck: number; byOs: Record<string, { worked: number; stuck: number }> };
+type Votes = { worked: number; stuck: number; byOs: Record<string, { worked: number; stuck: number }>; saves?: number };
 
 export type Mode = "install" | "source";
 
@@ -523,6 +523,7 @@ function Report({
             )}
           </div>
           </About>
+          {!priv && <Community votes={result.votes} />}
           <BeforeYouStart facts={beforeYouStart(result)} />
           {!priv && <DownloadManual repo={meta.fullName} os={os} steps={steps.length} />}
         </div>
@@ -549,14 +550,7 @@ function Report({
                 {fresh.label}
               </dd>
             </div>
-            {!priv && result.votes.worked > 0 && (
-              <div>
-                <dt>Got it running</dt>
-                <dd className="num">
-                  {result.votes.worked} {result.votes.worked === 1 ? "person" : "people"}
-                </dd>
-              </div>
-            )}
+            {/* "Got it running" is in the header's community line (Community), from 5 votes up. */}
           </dl>
           {!priv && <CarbonAd className="ad-head" />}
         </div>
@@ -2196,7 +2190,7 @@ function DidItWork({ repo, os, votes, onVotes, steps, version }: { repo: string;
   }
 
   return (
-    <div className="panel vote">
+    <div className="panel vote" id="did-it-work">
       <div>
         <h3>{voted ? (voted === "worked" ? "Nice, it's running 🎉" : "Thanks, that helps others") : "Did you get it running?"}</h3>
         <p className="note">
@@ -2228,6 +2222,40 @@ function DidItWork({ repo, os, votes, onVotes, steps, version }: { repo: string;
         )
       )}
     </div>
+  );
+}
+
+// Under the tags: what other people did with this repo here. A number only shows from SHOWN_FROM up: "1 got it running"
+// says less than nothing. Until then, a link to the vote below the steps, so the first votes come in.
+const SHOWN_FROM = 5;
+function Community({ votes }: { votes: Votes }) {
+  const worked = votes.worked >= SHOWN_FROM ? votes.worked : 0;
+  const saved = (votes.saves ?? 0) >= SHOWN_FROM ? votes.saves! : 0;
+  const go = (e: React.MouseEvent) => {
+    const el = document.getElementById("did-it-work");
+    if (!el) return;
+    e.preventDefault();
+    el.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+  };
+  return (
+    <p className="community">
+      {worked > 0 && (
+        <span>
+          <span className="community-ok" aria-hidden="true">
+            ✓
+          </span>{" "}
+          <b>{worked.toLocaleString("en-US")}</b> got it running
+        </span>
+      )}
+      {saved > 0 && (
+        <span>
+          Saved by <b>{saved.toLocaleString("en-US")}</b>
+        </span>
+      )}
+      <a href="#did-it-work" onClick={go}>
+        {worked ? "Did it work for you?" : "Got it running? Tell others"}
+      </a>
+    </p>
   );
 }
 

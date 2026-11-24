@@ -625,6 +625,12 @@ details[open].panel > summary h3::after { content: " −"; }
 .about-fit dd::before { position: absolute; left: 0; top: 0.2em; width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--ink); font: 800 9px/1 var(--sans); }
 .fit-good dd::before { content: "✓"; background: var(--yes); }
 .fit-not dd::before { content: "✕"; background: var(--no); }
+/* Under the tags: "✓ 128 got it running · Saved by 42 · Did it work for you?" (app/report.tsx Community) */
+.community { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 12px 0 0; font-size: var(--fs-meta); color: var(--pencil); }
+.community b { color: var(--ink); font-weight: 700; }
+.community-ok { display: inline-grid; place-items: center; width: 15px; height: 15px; border: 1.5px solid var(--ink); border-radius: 50%; background: var(--yes); color: var(--ink); font: 800 9px/1 var(--sans); vertical-align: -2px; }
+.community a { color: inherit; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.community a:hover { color: var(--ink); text-decoration-color: var(--wrench); }
 .about-note { margin: 0; font-size: var(--fs-meta); color: var(--pencil); }
 /* The subtitle and tags, with the README's pictures stacked beside them (app/about.tsx) */
 .intro-shots { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 24px; align-items: start; }
