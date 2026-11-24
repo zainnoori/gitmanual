@@ -1,6 +1,6 @@
 import { analyze, inFolder, mainSubfolder, presentPaths, selectFiles, type Analysis } from "./detect";
 import { after } from "next/server";
-import { CACHE_MS, countView, markGoneFromGitHub, readSaved, repoKey, saveRepo } from "./db";
+import { CACHE_MS, countView, markGoneFromGitHub, readSaved, repoKey, saveRepo, type RepoSummary } from "./db";
 import { getFiles, getHeadSha, getLatestRelease, getRepoMeta, getTree, GitHubError, type RepoMeta, type RepoRef } from "./github";
 import { findDocsLink, findDownloadPage, findSetupDocs, findSetupScripts, type Guides, type SetupDoc } from "./guides";
 import { announceRepo } from "./indexnow";
@@ -8,6 +8,7 @@ import { parseRelease, readmeInstallCommands, type InstallOptions } from "./inst
 import { OS_LIST } from "./os";
 import { declaredPlatforms, mentions } from "./platforms";
 import { platformFiles, platformOnly } from "./platform";
+import { summarize } from "./summary";
 
 // Bump when the analysis output changes shape or rules, so saved copies are re-analyzed instead of shown.
 export const VERSION = 14; // 14: build-only Dockerfiles, Android APK releases in the will-it-work answer
@@ -23,7 +24,8 @@ export type RepoData = {
 };
 
 // gone: when a re-read found the repo gone from GitHub (the saved manual is shown with a notice).
-export type Loaded = { key: string; data: RepoData; analyzedAt: number; cached: boolean; stale?: boolean; gone?: number };
+// summary: the AI summary of the README (lib/summary.ts), when one has been written.
+export type Loaded = { key: string; data: RepoData; analyzedAt: number; cached: boolean; stale?: boolean; gone?: number; summary?: RepoSummary | null };
 
 // A manual an admin took down (/admin/repos): every page, API and download treats it as not there.
 export const REMOVED = "This manual was removed from gitmanual.";
@@ -57,11 +59,12 @@ export async function loadRepo(
   if (read !== "error" && read.gone?.reason === "hidden") throw new GitHubError(REMOVED, 410);
   const saved = read === "error" ? "error" : read.saved;
   const gone = read === "error" ? undefined : read.gone?.at;
+  const summary = read === "error" ? null : read.summary;
   const cached = saved && saved !== "error" && (saved.data as RepoData).version === VERSION ? saved : null;
   if (cached && !opts.fresh) {
     if (!opts.bot && Date.now() - cached.analyzedAt >= CACHE_MS) refreshLater(ref, lookup, opts.gate);
     if (opts.view) viewed(lookup);
-    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, gone };
+    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, gone, summary };
   }
 
   try {
@@ -71,14 +74,15 @@ export async function loadRepo(
     if (saved === "error") return { key: lookup, data: await readPublic(ref), analyzedAt: Date.now(), cached: false };
     const loaded = await rebuild(ref, !saved);
     if (opts.view) viewed(loaded.key);
-    return loaded;
+    // Under a new name (a renamed repo) the summary read above was for the old one; the page redirects anyway.
+    return { ...loaded, summary: loaded.key === lookup ? summary : null };
   } catch (err) {
     // GitHub is down or rate-limited, or the visitor is over a limit: an older saved copy beats an error page.
     // Gone from GitHub (rebuild marked it): the saved copy, with a notice instead of "GitHub didn't answer".
     if (!cached) throw err;
     if (opts.view) viewed(lookup);
-    if (goneFrom(err)) return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, gone: Date.now() };
-    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, stale: true, gone };
+    if (goneFrom(err)) return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, gone: Date.now(), summary };
+    return { key: lookup, data: cached.data as RepoData, analyzedAt: cached.analyzedAt, cached: true, stale: true, gone, summary };
   }
 }
 
@@ -107,7 +111,21 @@ async function rebuild(ref: RepoRef, isNew: boolean): Promise<Loaded> {
   );
   // A repo new to gitmanual (main branch only; branch views aren't indexed): tell search engines about its pages.
   if (isNew && !ref.ref) announceRepo(meta.fullName);
+  // The README summary, after the page is sent, when the README changed since the last one (main branch only).
+  if (!ref.ref) later(() => summarize({ key, fullName: meta.fullName, description: meta.description, topics: meta.topics, readme: readmeOf(data.files) }));
   return { key, data, analyzedAt, cached: false };
+}
+
+const readmeOf = (files: Record<string, string>) => Object.entries(files).find(([p]) => /^readme(\.\w+)?$/i.test(p))?.[1];
+
+// Work for after the response; outside a request (scripts, tests) it runs right away.
+function later(fn: () => Promise<unknown>) {
+  const run = () => fn().catch(() => {});
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }
 
 // Background re-reads of expired manuals: each repo once at a time, and a few at once per server, so a burst of

@@ -157,6 +157,13 @@ const SCHEMA = `
     note TEXT,                      -- why (hidden), or GitHub's answer (github)
     by TEXT                         -- GitHub login of the admin who hid it
   );
+  CREATE TABLE IF NOT EXISTS repo_summaries (
+    key TEXT PRIMARY KEY,           -- lower-case owner/repo
+    readme_hash TEXT NOT NULL,      -- which README it was written from (lib/summary.ts readmeHash)
+    data TEXT NOT NULL,             -- JSON RepoSummary
+    model TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS interest (
     feature TEXT NOT NULL,          -- a feature not built yet, e.g. "pdf", whose button only says "coming soon"
     day TEXT NOT NULL,              -- UTC date, YYYY-MM-DD
@@ -207,7 +214,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 10; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks, 10: repo_gone
+const SCHEMA_VERSION = 11; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks, 10: repo_gone, 11: repo_summaries
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -434,19 +441,48 @@ const baseKey = (key: string) => key.split("@")[0];
 // The saved manual and any gone mark (its own or, for a branch view, the repo's), or "error" when the database
 // didn't answer: loadRepo then builds the page without saving it, instead of adding a big write to a database
 // that's already struggling.
-export function readSaved(key: string): Promise<{ saved: { data: unknown; analyzedAt: number } | null; gone: GoneMark | null } | "error"> {
-  return safely<{ saved: { data: unknown; analyzedAt: number } | null; gone: GoneMark | null } | "error">("error", async (c) => {
+// The summary (lib/summary.ts) comes in the same read: one round trip for the whole manual.
+type Read = { saved: { data: unknown; analyzedAt: number } | null; gone: GoneMark | null; summary: RepoSummary | null };
+export function readSaved(key: string): Promise<Read | "error"> {
+  return safely<Read | "error">("error", async (c) => {
     const { rows } = await c.execute({
-      sql: `SELECT r.data, r.analyzed_at, g.reason, g.at AS gone_at, g.note
+      sql: `SELECT r.data, r.analyzed_at, g.reason, g.at AS gone_at, g.note, s.data AS summary
             FROM (SELECT 1) LEFT JOIN repos r ON r.key = ?
-            LEFT JOIN (SELECT reason, at, note FROM repo_gone WHERE key IN (?, ?) ORDER BY reason = 'hidden' DESC LIMIT 1) g`,
-      args: [key, key, baseKey(key)],
+            LEFT JOIN (SELECT reason, at, note FROM repo_gone WHERE key IN (?, ?) ORDER BY reason = 'hidden' DESC LIMIT 1) g
+            LEFT JOIN repo_summaries s ON s.key = ?`,
+      args: [key, key, baseKey(key), baseKey(key)],
     });
     const row = rows[0];
+    let summary: RepoSummary | null = null;
+    try {
+      summary = row?.summary == null ? null : (JSON.parse(String(row.summary)) as RepoSummary);
+    } catch {}
     return {
       saved: row && row.data != null ? { data: JSON.parse(String(row.data)), analyzedAt: Number(row.analyzed_at) } : null,
       gone: row && row.reason != null ? { reason: String(row.reason) as GoneReason, at: Number(row.gone_at), note: row.note == null ? null : String(row.note) } : null,
+      summary,
     };
+  });
+}
+
+// ---- README summaries, the manual's subtitle (lib/summary.ts) ----
+export type RepoSummary = { what: string; goodFor: string[]; notFor: string[]; features: string[] };
+
+// Which README the saved summary was written from; null when there's none (or the database didn't answer).
+export function summaryHash(key: string): Promise<string | null> {
+  return safely(null, async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT readme_hash FROM repo_summaries WHERE key = ?", args: [baseKey(key)] });
+    return rows[0] ? String(rows[0].readme_hash) : null;
+  });
+}
+
+export function saveSummary(key: string, hash: string, summary: RepoSummary, model: string): Promise<void> {
+  return safely(undefined, async (c) => {
+    await c.execute({
+      sql: `INSERT INTO repo_summaries (key, readme_hash, data, model, created_at) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (key) DO UPDATE SET readme_hash = excluded.readme_hash, data = excluded.data, model = excluded.model, created_at = excluded.created_at`,
+      args: [baseKey(key), hash, JSON.stringify(summary), model, Date.now()],
+    });
   });
 }
 

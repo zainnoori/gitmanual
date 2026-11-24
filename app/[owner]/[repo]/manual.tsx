@@ -47,7 +47,7 @@ const getRepo = cache(async (owner: string, repo: string, ref?: string): Promise
   try {
     const bot = BOTS.test(ua);
     const l = await loadRepo({ owner, repo: name, ref }, { view: !bot, bot, gate: analyzeGate(h) });
-    return { data: { ...l.data, analyzedAt: l.analyzedAt, cached: l.cached, stale: l.stale, gone: l.gone, votes: await (l.key === key ? votes : getVotes(l.key)) } as ReportData };
+    return { data: { ...l.data, analyzedAt: l.analyzedAt, cached: l.cached, stale: l.stale, gone: l.gone, summary: l.summary, votes: await (l.key === key ? votes : getVotes(l.key)) } as ReportData };
   } catch (e) {
     return e instanceof GitHubError ? { error: e.message, status: e.status } : { error: "Failed to analyze repository.", status: 500 };
   }
@@ -58,7 +58,8 @@ function summary(d: ReportData): string {
   const { meta, analysis: a, install } = d;
   const list = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0]);
   const sentences = [
-    meta.description?.replace(/:[a-z0-9_+-]+:\s*/g, "").trim().replace(/[.!]?$/, "."),
+    // GitHub's description, or the first sentence of the README summary (lib/summary.ts) when the repo has none.
+    (meta.description || d.summary?.what.split(/(?<=\.)\s/)[0])?.replace(/:[a-z0-9_+-]+:\s*/g, "").trim().replace(/[.!]?$/, "."),
     install.platforms.length ? `Downloads for ${list(install.platforms.map((p) => OS_LABEL[p]))}.` : null,
     a.runtimes.length ? `Needs ${list(a.runtimes.slice(0, 3).map((r) => r.name))}.` : null,
     "Step-by-step setup for macOS, Windows and Linux.",
@@ -210,7 +211,7 @@ function JsonLd({ data, os, osPage }: { data: ReportData; os: OS; osPage: OS | n
       "@type": "SoftwareSourceCode",
       "@id": `${home}#software`,
       name,
-      description: meta.description ?? undefined,
+      description: meta.description || data.summary?.what || undefined,
       codeRepository: meta.htmlUrl,
       programmingLanguage: meta.language ?? undefined,
       license: meta.license && meta.license !== "NOASSERTION" ? `https://spdx.org/licenses/${meta.license}` : undefined,

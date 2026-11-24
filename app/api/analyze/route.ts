@@ -10,8 +10,8 @@ export async function POST(req: Request) {
   if (!ref) return NextResponse.json({ error: "Enter a GitHub URL like github.com/owner/repo" }, { status: 400 });
 
   try {
-    const { key, data, analyzedAt, cached, stale, gone } = await loadRepo(ref, { fresh, view: true, gate: analyzeGate(req.headers) });
-    return NextResponse.json({ ...data, analyzedAt, cached, stale, gone, votes: await getVotes(key) });
+    const { key, data, analyzedAt, cached, stale, gone, summary } = await loadRepo(ref, { fresh, view: true, gate: analyzeGate(req.headers) });
+    return NextResponse.json({ ...data, analyzedAt, cached, stale, gone, summary, votes: await getVotes(key) });
   } catch (err) {
     if (err instanceof LimitError) return NextResponse.json({ error: err.message }, { status: 429, headers: limitHeaders(err) });
     if (err instanceof GitHubError) return NextResponse.json({ error: err.message }, { status: err.status });

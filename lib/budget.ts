@@ -45,6 +45,9 @@ export const POOLS = {
   // Reports made ahead of time for the most-viewed manuals (scripts/prerun-inspections.ts), so the free preview on
   // those manuals shows real results. About $0.007 each at most on Haiku.
   inspectionPrerun: { answersPerDay: 300, inProgress: 2, dailyUsd: 3 },
+  // README summaries on manuals (lib/summary.ts): one Haiku summary per README version, written after a manual is read from
+  // GitHub, for the whole site (account "site"). About $0.001 each at most.
+  summary: { answersPerDay: 3000, inProgress: 4, dailyUsd: 2 },
 } satisfies Record<string, Pool>;
 
 export type PoolName = keyof typeof POOLS;

@@ -1,5 +1,8 @@
 "use client";
 
+import { About } from "./about";
+import type { RepoSummary } from "@/lib/db";
+import { gallery } from "@/lib/gallery";
 import Link from "next/link";
 import { Suspense, use, useEffect, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
@@ -59,6 +62,7 @@ type Result = {
   cached: boolean;
   stale?: boolean;
   gone?: number; // when a re-read found the repo gone from GitHub (lib/pipeline.ts)
+  summary?: RepoSummary | null; // the AI summary of the README, shown as the subtitle (lib/summary.ts)
   votes: Votes;
   version?: number; // the analysis version (lib/pipeline.ts)
 };
@@ -450,6 +454,8 @@ function Report({
   const fresh = freshness(meta.pushedAt);
   const level = { Easy: 1, Moderate: 2, Involved: 3 }[a.difficulty.label];
   const setup = buildScript(steps, os, meta.fullName, process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
+  // The README's own pictures, picked from the README already read (nothing stored): lib/gallery.ts.
+  const shots = gallery(Object.entries(files).find(([p]) => /^readme(\.\w+)?$/i.test(p))?.[1], meta.htmlUrl, meta.branch);
   const setupFile = `/${meta.fullName}/setup/${os === "windows" ? "windows.ps1" : `${os}.sh`}`;
   const md = (text: string) => (
     <ReactMarkdown components={blocks} urlTransform={(url, key) => repoUrl(url, key, meta.htmlUrl, meta.branch)}>
@@ -469,7 +475,8 @@ function Report({
     <div className="wrap report">
       <header className="sheet-head">
         <div>
-          <p className="eyebrow">{osPage ? `How to install on ${OS_LABEL[os]}` : "Assembly instructions"}</p>
+          {/* Per-system pages say which system they're for; the main manual starts with the repo's name. */}
+          {osPage && <p className="eyebrow">How to install on {OS_LABEL[os]}</p>}
           {/* The title, with Save (a bookmark) at its end: saving is about the repo, the PDF below is about the manual. */}
           <div className="title-row">
             <h1 className="display-md repo-title" translate="no">
@@ -481,7 +488,15 @@ function Report({
             </h1>
             {!priv && <SaveButton repo={meta.fullName} os={os} />}
           </div>
-          {meta.description && <p className="lead">{meta.description}</p>}
+          {/* Private manuals: GitHub's description only (no summary or pictures are made for them). */}
+          <About
+            description={meta.description}
+            summary={priv ? null : result.summary}
+            shots={priv ? [] : shots}
+            repo={meta.fullName}
+            readmeUrl={`${meta.htmlUrl}#readme`}
+            manual={priv ? null : { repo: meta.fullName, os, steps: steps.map((s) => s.title), version: result.version ?? 0 }}
+          >
           <div className="chips">
             {/* The language and the GitHub topics open the shelf filtered to the other manuals that share them. */}
             {(a.stacks.length ? a.stacks : [meta.language ?? "Unknown stack"]).map((s) =>
@@ -507,6 +522,7 @@ function Report({
               ),
             )}
           </div>
+          </About>
           <BeforeYouStart facts={beforeYouStart(result)} />
           {!priv && <DownloadManual repo={meta.fullName} os={os} steps={steps.length} />}
         </div>
