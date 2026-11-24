@@ -29,9 +29,6 @@ export type ProblemKind = (typeof PROBLEM_KINDS)[number]["id"] | (typeof SITE_KI
 export type ProblemMode = "manual" | "site" | "contact";
 const KINDS_FOR: Record<ProblemMode, readonly { id: string }[]> = { manual: PROBLEM_KINDS, site: SITE_KINDS, contact: CONTACT_KINDS };
 export const KIND_LABEL: Record<string, string> = Object.fromEntries([...CONTACT_KINDS, ...SITE_KINDS, ...PROBLEM_KINDS].map((k) => [k.id, k.label]));
-// About money or an account: nobody can sort it out without a way to reply.
-export const needsEmail = (kind: string) => kind === "payment" || kind === "account";
-
 export const PROBLEM_LIMITS = { message: 2000, error: 4000, email: 200, stepTitle: 200, page: 300, name: 100 };
 
 export type ProblemInput = {
@@ -68,7 +65,8 @@ export function checkProblem(body: Record<string, unknown>): ProblemInput | stri
   const step = !site && typeof body.step === "number" && Number.isInteger(body.step) && body.step > 0 && body.step < 100 ? body.step : null;
   const email = text(body.email, PROBLEM_LIMITS.email) || null;
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "That email address doesn't look right.";
-  if (!email && (needsEmail(kind) || (mode === "contact" && kind !== "feedback"))) return "Add your email so we can get back to you about this.";
+  // Every report and message needs a way to answer it: without one there's nothing we can do with it.
+  if (!email) return "Add your email so we can reply. We only use it to answer this.";
   const page = text(body.page, PROBLEM_LIMITS.page);
   return {
     mode,

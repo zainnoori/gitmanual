@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { OS_LABEL, type OS } from "@/lib/os";
-import { CONTACT_KINDS, needsEmail, PROBLEM_KINDS, PROBLEM_LIMITS, SITE_KINDS, type ProblemKind } from "@/lib/problems";
+import { CONTACT_KINDS, PROBLEM_KINDS, PROBLEM_LIMITS, SITE_KINDS, type ProblemKind } from "@/lib/problems";
 
 // One form, three places, one inbox (app/api/problems → /admin/problems):
 //   manual  "Something wrong with this manual?": the repo, system, step and manual version filled in
@@ -38,7 +38,6 @@ export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: F
   const withSteps = mode === "manual" && steps.length > 1 && (kind === "step" || kind === "system" || kind === "question");
   const withError = mode !== "contact" && kind !== "question" && kind !== "missing" && kind !== "payment";
   const withRepo = (mode === "site" && kind === "manual") || (mode === "contact" && kind === "maintainer");
-  const emailNeeded = needsEmail(kind) || (mode === "contact" && kind !== "feedback");
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
@@ -79,7 +78,7 @@ export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: F
         <p>
           <strong>Thanks, we&apos;ve got it.</strong>{" "}
           {mode === "manual" ? "We read every report and use it to fix this manual and others like it." : "We read every message."}
-          {email ? " We'll reply by email." : ""}
+          {" We'll reply by email."}
         </p>
         <button
           type="button"
@@ -188,10 +187,10 @@ export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: F
           <span>
             Your email{" "}
             <small>
-              {!emailNeeded ? "optional, only to reply" : kind === "payment" ? "the one you paid with, so we can reply" : "so we can reply"}
+              {kind === "payment" ? "the one you paid with, so we can reply" : "so we can reply, never shared"}
             </small>
           </span>
-          <input type="email" required={emailNeeded} maxLength={PROBLEM_LIMITS.email} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
+          <input type="email" required maxLength={PROBLEM_LIMITS.email} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
         </label>
       </div>
 
