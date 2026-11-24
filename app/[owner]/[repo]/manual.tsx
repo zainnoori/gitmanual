@@ -1,3 +1,4 @@
+import { forBrowser } from "@/lib/page-data";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { notFound, permanentRedirect } from "next/navigation";
@@ -140,7 +141,7 @@ export async function RepoManual({ params, searchParams }: Props) {
   }
 
   const initialOs: OS = osPage ?? (OS_LIST.includes(os as OS) ? (os as OS) : "mac");
-  const initialMode = mode === "install" || mode === "source" ? (mode as Mode) : undefined;
+  const initialMode = mode === "install" || mode === "source" || mode === "hardware" ? (mode as Mode) : undefined;
   return (
     <>
       {"data" in r && <JsonLd data={r.data} os={initialOs} osPage={osPage} />}
@@ -149,7 +150,7 @@ export async function RepoManual({ params, searchParams }: Props) {
         owner={owner}
         repo={repo.replace(/\.git$/, "")}
         gitRef={ref}
-        initial={"data" in r ? r.data : null}
+        initial={"data" in r ? forBrowser(r.data) : null}
         initialError={"error" in r ? r.error : null}
         initialStatus={"error" in r ? r.status : null}
         githubApp={Boolean(githubApp())}

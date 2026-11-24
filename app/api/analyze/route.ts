@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getVotes } from "@/lib/db";
 import { GitHubError, parseRepoUrl } from "@/lib/github";
 import { analyzeGate, LimitError, limitHeaders } from "@/lib/limit";
+import { forBrowser } from "@/lib/page-data";
 import { loadRepo } from "@/lib/pipeline";
 
 export async function POST(req: Request) {
@@ -11,7 +12,7 @@ export async function POST(req: Request) {
 
   try {
     const { key, data, analyzedAt, cached, stale, gone, summary } = await loadRepo(ref, { fresh, view: true, gate: analyzeGate(req.headers) });
-    return NextResponse.json({ ...data, analyzedAt, cached, stale, gone, summary, votes: await getVotes(key) });
+    return NextResponse.json({ ...forBrowser(data), analyzedAt, cached, stale, gone, summary, votes: await getVotes(key) });
   } catch (err) {
     if (err instanceof LimitError) return NextResponse.json({ error: err.message }, { status: 429, headers: limitHeaders(err) });
     if (err instanceof GitHubError) return NextResponse.json({ error: err.message }, { status: err.status });

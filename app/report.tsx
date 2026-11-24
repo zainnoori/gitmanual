@@ -2,7 +2,8 @@
 
 import { About } from "./about";
 import type { RepoSummary } from "@/lib/db";
-import { gallery } from "@/lib/gallery";
+import { gallery, type Shot } from "@/lib/gallery";
+import { HardwarePanel } from "./hardware";
 import Link from "next/link";
 import { Suspense, use, useEffect, useRef, useState } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
@@ -63,13 +64,15 @@ type Result = {
   stale?: boolean;
   gone?: number; // when a re-read found the repo gone from GitHub (lib/pipeline.ts)
   summary?: RepoSummary | null; // the AI summary of the README, shown as the subtitle (lib/summary.ts)
+  shots?: Shot[]; // the README's pictures, picked on the server (lib/page-data.ts), which sends file names only
   votes: Votes;
   version?: number; // the analysis version (lib/pipeline.ts)
 };
 
 type Votes = { worked: number; stuck: number; byOs: Record<string, { worked: number; stuck: number }>; saves?: number };
 
-export type Mode = "install" | "source";
+export type Mode = "install" | "source" | "hardware";
+export const isMode = (m: unknown): m is Mode => m === "install" || m === "source" || m === "hardware";
 
 function archLabel(arch: Arch | null, os: OS): string | null {
   if (!arch) return null;
@@ -248,7 +251,7 @@ export function ReportView({
         }
         if (cancelled) return;
         setResult(data);
-        setMode(qMode === "install" || qMode === "source" ? qMode : defaultMode(data));
+        setMode(isMode(qMode) ? qMode : defaultMode(data));
       })
       .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
       .finally(() => clearInterval(tick));
@@ -324,7 +327,7 @@ export function ReportView({
           setError(null);
           setResult(r);
           const qMode = new URLSearchParams(window.location.search).get("mode");
-          setMode(qMode === "install" || qMode === "source" ? qMode : defaultMode(r));
+          setMode(isMode(qMode) ? qMode : defaultMode(r));
         }}
       />
     );
@@ -455,7 +458,8 @@ function Report({
   const level = { Easy: 1, Moderate: 2, Involved: 3 }[a.difficulty.label];
   const setup = buildScript(steps, os, meta.fullName, process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000");
   // The README's own pictures, picked from the README already read (nothing stored): lib/gallery.ts.
-  const shots = gallery(Object.entries(files).find(([p]) => /^readme(\.\w+)?$/i.test(p))?.[1], meta.htmlUrl, meta.branch);
+  // (Private manuals come with their files, so they're picked here.)
+  const shots = result.shots ?? gallery(Object.entries(files).find(([p]) => /^readme(\.\w+)?$/i.test(p))?.[1], meta.htmlUrl, meta.branch);
   const setupFile = `/${meta.fullName}/setup/${os === "windows" ? "windows.ps1" : `${os}.sh`}`;
   const md = (text: string) => (
     <ReactMarkdown components={blocks} urlTransform={(url, key) => repoUrl(url, key, meta.htmlUrl, meta.branch)}>
@@ -664,12 +668,26 @@ function Report({
               {install.platforms.length > 0 && <span className="count">{install.platforms.length}</span>}
             </button>
             <button role="tab" aria-selected={mode === "source"} className={mode === "source" ? "on" : ""} onClick={() => onMode("source")}>
-              Build from source
+              <span className="tab-long">Build from source</span>
+              <span className="tab-short">Build</span>
               <span className="count">{steps.length}</span>
             </button>
+            {/* Read from the saved files when opened (app/api/hardware); private manuals aren't saved, so they don't have it. */}
+            {!priv && (
+              <button role="tab" aria-selected={mode === "hardware"} className={mode === "hardware" ? "on" : ""} onClick={() => onMode("hardware")}>
+                Hardware
+              </button>
+            )}
           </div>
 
-          {mode === "install" ? (
+          {mode === "hardware" && !priv ? (
+            <HardwarePanel
+              repo={meta.fullName}
+              os={os}
+              here={os === detectedOs && !phone}
+              link={(path) => `${meta.htmlUrl}/blob/${meta.branch}/${path.split("/").map(encodeURIComponent).join("/")}`}
+            />
+          ) : mode === "install" ? (
             <InstallPanel
               install={install}
               os={os}

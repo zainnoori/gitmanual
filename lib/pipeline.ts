@@ -7,6 +7,7 @@ import { announceRepo } from "./indexnow";
 import { parseRelease, readmeInstallCommands, type InstallOptions } from "./install";
 import { OS_LIST } from "./os";
 import { declaredPlatforms, mentions } from "./platforms";
+import { hardwareDocs } from "./hardware";
 import { platformFiles, platformOnly } from "./platform";
 import { summarize } from "./summary";
 
@@ -249,7 +250,18 @@ async function analyzeRepo(ref: RepoRef, token?: string): Promise<RepoData> {
     devcontainer: entries.some((e) => e.path === ".devcontainer/devcontainer.json" || e.path === ".devcontainer.json"),
   };
 
-  return { version: VERSION, meta: { ...meta, branch, fileCount: entries.length, treeTruncated: truncated, ...(commit && { commit }) }, analysis, install, guides, files };
+  // Pages about hardware (docs/gpu.mdx…), for the Hardware tab only: read after the analysis, so they can't change the
+  // steps, and best effort (raw files, which don't count against GitHub's API limit).
+  const hwPicked = hardwareDocs(entries).filter((e) => !(e.path in files));
+  const hwFiles = hwPicked.length ? await getFiles(ref, branch, hwPicked, token).catch(() => ({}) as Record<string, string>) : {};
+  return {
+    version: VERSION,
+    meta: { ...meta, branch, fileCount: entries.length, treeTruncated: truncated, ...(commit && { commit }) },
+    analysis,
+    install,
+    guides,
+    files: { ...files, ...hwFiles },
+  };
 }
 
 // A CONTRIBUTING file only counts as a setup guide when it actually has a setup section.

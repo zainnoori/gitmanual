@@ -625,6 +625,27 @@ details[open].panel > summary h3::after { content: " −"; }
 .about-fit dd::before { position: absolute; left: 0; top: 0.2em; width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; border: 1.5px solid var(--ink); font: 800 9px/1 var(--sans); }
 .fit-good dd::before { content: "✓"; background: var(--yes); }
 .fit-not dd::before { content: "✕"; background: var(--no); }
+/* The Hardware tab (app/hardware.tsx): what it needs, each with the line it came from, and the visitor's own chip */
+.tab-short { display: none; }
+@media (max-width: 760px) { .tab-long { display: none; } .tab-short { display: inline; } }
+.hw-intro { margin: 0 0 18px; color: var(--pencil); font-size: var(--fs-small); max-width: 70ch; }
+.hw-loading { color: var(--pencil); font: var(--fs-meta) var(--mono); }
+.hw-empty { font-size: var(--fs-small); line-height: 1.55; }
+.hw-list { display: grid; gap: 22px; }
+.hw-row { display: grid; gap: 10px; padding-bottom: 20px; border-bottom: 1.5px dashed var(--line-strong); }
+.hw-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.hw-row h3 { margin: 0; font: 700 var(--fs-label)/1 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--pencil); }
+.hw-value { margin: 0; font: 700 var(--fs-title)/1.3 var(--display); }
+.hw-level { margin-left: 6px; padding: 2px 8px; border: 1.5px solid var(--line-strong); border-radius: 999px; font: 600 var(--fs-meta)/1.4 var(--sans); color: var(--pencil); vertical-align: 2px; }
+.hw-level.hw-req { border-color: var(--ink); background: var(--maybe); color: var(--ink); }
+.hw-quote { margin: 6px 0 0; padding: 6px 0 6px 12px; border-left: 3px solid var(--line-strong); color: var(--pencil); font-size: var(--fs-small); line-height: 1.5; }
+.hw-quote a { white-space: nowrap; font-size: var(--fs-meta); }
+.hw-mine { display: flex; gap: 8px; align-items: baseline; margin: 4px 0 0; padding: 9px 12px; border: 1.5px solid var(--ink); border-radius: 10px; font-size: var(--fs-small); }
+.hw-mine > span { flex: none; display: inline-grid; place-items: center; width: 18px; height: 18px; border: 1.5px solid var(--ink); border-radius: 50%; font: 800 10px/1 var(--sans); }
+.hw-yes { background: color-mix(in srgb, var(--yes) 18%, var(--sheet)); } .hw-yes > span { background: var(--yes); }
+.hw-maybe { background: color-mix(in srgb, var(--maybe) 22%, var(--sheet)); } .hw-maybe > span { background: var(--maybe); }
+.hw-no { background: color-mix(in srgb, var(--no) 16%, var(--sheet)); } .hw-no > span { background: var(--no); }
+.hw-note { margin: 18px 0 0; font-size: var(--fs-meta); color: var(--pencil); }
 /* Under the tags: "✓ 128 got it running · Saved by 42 · Did it work for you?" (app/report.tsx Community) */
 .community { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 12px 0 0; font-size: var(--fs-meta); color: var(--pencil); }
 .community b { color: var(--ink); font-weight: 700; }
