@@ -8,8 +8,31 @@ export type Fit = {
   reasons: string[];
 };
 
-// Answers "will this work on my machine?" from what the analysis already found.
+const CPU_LABEL = { arm64: "an arm64 (ARM) processor", x64: "an x86-64 (Intel or AMD) processor" } as const;
+const ARCH_LABEL: Record<Arch, string> = { arm64: "arm64 (ARM)", x64: "x86-64 (Intel or AMD)", x86: "32-bit x86", armv7: "32-bit ARM", universal: "any" };
+
+// Answers "will this work on my machine?" from what the analysis already found. arch: the visitor's processor, when
+// it's their own system (null otherwise).
 export function fitCheck(a: Analysis, install: InstallOptions, os: OS, arch: Arch | null, archived: boolean): Fit {
+  const fit = baseFit(a, install, os, arch, archived);
+  // The processor it says it needs ("an arm64 Linux host"), for this system (or any). Only explicit requirements get
+  // here (lib/hardware.ts cpuNeed), and a confirmed wrong chip is the only "No" it gives.
+  const cpu = a.cpu && (!a.cpu.os || a.cpu.os === os) ? a.cpu : null;
+  if (!cpu || fit.status === "no") return fit;
+  const said = `The project says: “${cpu.quote}”`;
+  const fits = !arch || arch === "universal" ? null : cpu.arch === "arm64" ? arch === "arm64" : arch === "x64" || arch === "x86" || (os === "mac" && arch === "arm64"); // Rosetta 2 runs Intel code on Apple Silicon
+  if (fits === false)
+    return { status: "no", headline: `Needs ${CPU_LABEL[cpu.arch]}`, reasons: [said, `Yours is ${ARCH_LABEL[arch!]}, so it won't run on this computer.`] };
+  if (fits === true) return { ...fit, reasons: [...fit.reasons, `It needs ${CPU_LABEL[cpu.arch]}, which yours is.`] };
+  // Not known which processor this is: say what it needs, and don't promise more than "maybe".
+  return {
+    status: "maybe",
+    headline: fit.status === "yes" ? `Only on ${cpu.arch === "arm64" ? "arm64 (ARM)" : "x86-64"} computers` : fit.headline,
+    reasons: [said, ...fit.reasons],
+  };
+}
+
+function baseFit(a: Analysis, install: InstallOptions, os: OS, arch: Arch | null, archived: boolean): Fit {
   const name = OS_LABEL[os];
   const reasons: string[] = [];
   const assets = install.release?.assets.filter((x) => x.os === os) ?? [];
@@ -118,6 +141,23 @@ export function fitCheck(a: Analysis, install: InstallOptions, os: OS, arch: Arc
     reasons.push(parts.length ? `You'll build it yourself with ${parts.slice(0, 4).join(", ")}.` : "You'll build it yourself from the source code.");
     if (a.services.length) reasons.push(`It also needs ${a.services.map((s) => s.name).join(", ")} running (Docker handles this).`);
     return { status: "yes", headline: `Yes, it runs on ${name}`, reasons };
+  }
+
+  // Made for this very system (it says so, or its code does), with nothing else above to go on: that's still an answer.
+  const readmeSteps = a.steps[os].some((s) => s.from === "readme" && s.commands.length);
+  if (only?.os === os) {
+    const said = only.signals.map((x) => x.replace(/\s*\([^)]*\)$/, "")).slice(0, 3);
+    reasons.push(`It's made for ${name}: ${said.length > 1 ? `${said.slice(0, -1).join(", ")} and ${said.at(-1)}` : said[0]}.`);
+    reasons.push(readmeSteps ? "Follow the README's steps below, in order." : "There are no setup files we know, so the README below is your guide.");
+    // A firm "Yes" only when its code shows it (only.sure) and the README gives the steps; a description alone can be
+    // misread (a list of links that mentions macOS), so that stays "Probably".
+    if (only.sure && readmeSteps) return { status: "yes", headline: `Yes, it's made for ${name}`, reasons };
+    return { status: "maybe", headline: only.sure ? `Made for ${name}: follow its README` : `Probably made for ${name}: follow its README`, reasons };
+  }
+  // No setup files we know, but the README lists the commands: they're the way in, unchecked for this system.
+  if (readmeSteps) {
+    reasons.push("There are no setup files we know, but the README lists the commands: follow them in order below.");
+    return { status: "maybe", headline: "Maybe: follow the README's steps", reasons };
   }
 
   reasons.push("We couldn't spot a known setup. The README below is your best guide.");

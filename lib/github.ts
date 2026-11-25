@@ -252,7 +252,9 @@ export async function getFiles(
         if (res.ok) out[e.path] = await res.text();
       }),
   );
-  return out;
+  // In the order asked for, not the order the downloads finished: "the first .env example" or "the first Python
+  // version" mustn't change from one re-read to the next with network timing.
+  return Object.fromEntries(entries.filter((e) => e.path in out).map((e) => [e.path, out[e.path]]));
 }
 
 // Latest stable release that actually ships files; falls back to a pre-release with files.

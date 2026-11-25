@@ -27,12 +27,14 @@ const SETUP_DOC = /(^|\/)(install(ation)?|setup|getting[-_]started|quick[-_]?sta
 // in full, since every line is about what it runs on.
 const HW_DOC = /(^|\/)(gpus?|hardware|hardware[-_]requirements|system[-_]requirements|minimum[-_]requirements|requirements|prerequisites|supported[-_](hardware|gpus?|devices))\.(md|mdx|rst)$/i;
 const NOT_DOCS = /(^|\/)(node_modules|vendor|third[-_]party|external|deps|tests?|examples?|\.github)\//i;
+// The project's own pages: at the root or in its docs folder, not a sub-component's (vscode's copilot_shim/REQUIREMENTS.md).
+const OWN_DOC = (p: string) => !p.includes("/") || /^(docs?|documentation)\//i.test(p);
 const MAX_HW_DOCS = 2;
 
 // Which of a repo's files to fetch for the Hardware tab, shallowest first (docs/gpu.mdx before a plugin's own page).
 export function hardwareDocs<T extends { path: string; size?: number }>(entries: T[]): T[] {
   return entries
-    .filter((e) => HW_DOC.test(e.path) && !NOT_DOCS.test(e.path) && (e.size ?? 0) <= 200_000)
+    .filter((e) => HW_DOC.test(e.path) && !NOT_DOCS.test(e.path) && OWN_DOC(e.path) && (e.size ?? 0) <= 200_000)
     .sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.localeCompare(b.path))
     .slice(0, MAX_HW_DOCS);
 }
@@ -65,8 +67,11 @@ function sentences(readme: string): { s: string; heading: string }[] {
   // Paragraphs wrapped over several lines are joined first, so a quote is a whole sentence, not "requires … or".
   let para: string[] = [];
   const flush = () => {
-    const p = plain(para.join(" "));
+    const raw = para.join(" ").trim();
+    const p = plain(raw);
     para = [];
+    // A paragraph that's all italic is an image caption ("*The desktop, rendered on the CPU.*"), not a statement.
+    if (/^[*_][^*_]/.test(raw) && /[^*_][*_]$/.test(raw)) return;
     if (p.length < 4) return;
     for (const s of p.split(/(?<=[.!?])\s+(?=[A-Z])/)) if (s.length >= 4) out.push({ s, heading });
   };
@@ -99,6 +104,8 @@ const CPU_OK = /(?<![/\w])(CPU[- ]only|CPU mode|on (the |your )?CPU(?!\/)|runs? 
 // Lines that mention hardware without being about this project's needs: credits, benchmarks, the machine something
 // was tested on, changelog entries ("[2026.5.9] v1.3.9 …").
 const NOISE = /\b(sponsor|thanks to|benchmark(s|ed)?|leaderboard|tested on|trained on|we used|paper|citation|cite|uses code from|announcing)\b|^\[?\d{4}[.\-/]\d|^v?\d+\.\d+(\.\d+)? [—-]/i;
+// Sections that describe the project itself, not what it needs: its folders, licenses, credits, changes.
+const NOISE_HEADING = /\b(layout|structure|director(y|ies)|folders?|licen[cs]es?|acknowledg\w*|credits?|contribut\w*|changelog|release notes|history|roadmap|faq)\b/i;
 // Any mention of a kind of card, even a bare name, for lines that list several: "for NVIDIA, AMD ROCm, Intel Arc,
 // Apple Silicon" means most graphics cards will do, not one of them.
 const KINDS: [GpuVendor | "intel", RegExp][] = [
@@ -163,21 +170,68 @@ function fileSignals(files: Record<string, string>): GpuNeed[] {
 }
 
 // setupDoc: the guide the manual picked (guides.doc.path), when there is one.
-export function hardwareNeeds(files: Record<string, string>, opts: { setupDoc?: string | null } = {}): Hardware {
+// The sentences to read, with where each came from: the README first (its line is the one quoted when two files say
+// the same thing), then hardware pages, then the setup guide.
+function readLines(files: Record<string, string>, setupDoc?: string | null) {
   const paths = Object.keys(files);
   const readmePath = paths.find((p) => README.test(p));
-  const guide = opts.setupDoc && opts.setupDoc in files ? opts.setupDoc : paths.find((p) => SETUP_DOC.test(p) && !README.test(p));
-  const hwDocs = paths.filter((p) => HW_DOC.test(p) && !NOT_DOCS.test(p)).slice(0, MAX_HW_DOCS);
-  // The README first, so its line is the one quoted when both say the same thing; then hardware pages, then the guide.
-  const lines = [...new Set([readmePath, ...hwDocs, guide].filter((p): p is string => Boolean(p)))]
-    .filter((p): p is string => Boolean(p))
-    .flatMap((source) => sentences(files[source]).map((x) => ({ ...x, source })));
+  const guide = setupDoc && setupDoc in files ? setupDoc : paths.find((p) => SETUP_DOC.test(p) && !README.test(p));
+  const hwDocs = paths.filter((p) => HW_DOC.test(p) && !NOT_DOCS.test(p) && OWN_DOC(p)).slice(0, MAX_HW_DOCS);
+  const lines = [...new Set([readmePath, ...hwDocs, guide].filter((p): p is string => Boolean(p)))].flatMap((source) =>
+    sentences(files[source]).map((x) => ({ ...x, source })),
+  );
+  return { lines, readmePath, hwDocs, guide };
+}
+
+// ---- The processor it needs: arm64 (ARM) or x86-64 only ----
+// A wrong "No" turns people away, so only explicit requirements count: a line under a requirements heading, or one that
+// says "only", "requires" or "must", naming one kind of processor. Download lists ("arm64.dmg, x64.exe"), lines naming
+// both kinds, and "tested on" machines don't.
+export type CpuArch = "arm64" | "x64";
+export type CpuNeed = { arch: CpuArch; os: "mac" | "windows" | "linux" | null; quote: string; source: string };
+// The processor words. "x86_64" loses its underscore when markdown is cleaned, so a space counts too.
+const ARM_WORD = String.raw`(?:arm64|aarch64|ARMv8(?:\.\d)?(?:-A)?|64-bit ARM|ARM64)`;
+const X86_WORD = String.raw`(?:x86[-_ ]64(?:-v\d)?|amd64|x64|64-bit (?:Intel|x86))`;
+const ARM_ANY = /\b(arm64|aarch64|ARMv\d|ARM64|Arm|ARM|Apple Silicon|M[1-5](?: (?:Pro|Max|Ultra))?)\b/;
+const X86_ANY = /\b(x86[-_ ]?64|amd64|x64|x86|Intel|AMD64)\b/i;
+// The word has to describe the machine: "an arm64 Linux host", "x86-64 CPU", "architecture: arm64", "arm64 only".
+const MACHINE = String.raw`(?:\s+\S+){0,2}?\s+(?:host|machine|computer|cpus?|processors?|system|device|server|hardware|board|pc|platform)\b`;
+const ARM_NEED = new RegExp(String.raw`\b${ARM_WORD}${MACHINE}|\b(?:architecture|cpu|processor)s?:?\s+${ARM_WORD}\b|\b${ARM_WORD}[- ]only\b|\bonly (?:on |for )?${ARM_WORD}\b`, "i");
+const X86_NEED = new RegExp(String.raw`\b${X86_WORD}${MACHINE}|\b(?:architecture|cpu|processor)s?:?\s+${X86_WORD}\b|\b${X86_WORD}[- ]only\b|\bonly (?:on |for )?${X86_WORD}\b`, "i");
+const ONLY = /\b(only|requires?|required|must|needs?)\b/i;
+const DOWNLOADS = /\.(dmg|exe|msi|deb|rpm|apk|zip|tar\.(gz|xz|bz2)|tgz|pkg|flatpak|snap)\b|\b(download\w*|AppImage|tarball|flatpak|snap|wheels?|binar(y|ies)|builds?|release)\b/i;
+
+export function cpuNeed(files: Record<string, string>, opts: { setupDoc?: string | null } = {}): CpuNeed | null {
+  const { lines, readmePath, hwDocs } = readLines(files, opts.setupDoc);
+  for (const { s, heading, source } of lines) {
+    if (NOISE.test(s) || NOISE.test(heading) || NOISE_HEADING.test(heading) || DOWNLOADS.test(s) || CONDITIONAL.test(s)) continue;
+    // A label on one command or option ("[x86_64 only] Stop the microVM", "(arm64 only)") isn't about the project.
+    if (/[[(][^\])]*\b(only|required)\b[^\])]*[\])]/i.test(s)) continue;
+    const underNeeds = GUIDE_HEADING.test(heading) || /^(system )?requirements?\s*:/i.test(s);
+    // A setup guide (CONTRIBUTING, BUILDING…) only counts under its requirements: elsewhere it's about the maintainers' machines.
+    if (source !== readmePath && !hwDocs.includes(source) && !underNeeds) continue;
+    const arm = ARM_NEED.test(s);
+    const x86 = X86_NEED.test(s);
+    if (arm === x86) continue; // neither, or both
+    if (!(underNeeds || ONLY.test(s)) || OPTIONAL.test(s)) continue;
+    // The other kind anywhere in the same file: then "only" is about one package or command (MarkFlowy's Linux
+    // package, firecracker's API examples), not the project. A project that really needs one kind never mentions the other.
+    const whole = files[source];
+    if (arm ? X86_ANY.test(plain(whole)) : ARM_ANY.test(plain(whole))) continue;
+    const os = /\blinux\b/i.test(s) ? "linux" : /\bmacOS\b|\bMac\b/.test(s) ? "mac" : /\bwindows\b/i.test(s) ? "windows" : null;
+    return { arch: arm ? "arm64" : "x64", os, quote: clip(s), source };
+  }
+  return null;
+}
+
+export function hardwareNeeds(files: Record<string, string>, opts: { setupDoc?: string | null } = {}): Hardware {
+  const { lines, readmePath, hwDocs } = readLines(files, opts.setupDoc);
   const out: Hardware = { gpu: [], cpuOnly: null, memory: [], vram: [], disk: [] };
   const seen = new Set<string>();
   const vendors = new Set<GpuVendor>();
 
   for (const { s, heading, source } of lines) {
-    if (NOISE.test(s) || NOISE.test(heading)) continue;
+    if (NOISE.test(s) || NOISE.test(heading) || NOISE_HEADING.test(heading)) continue;
     // In a guide, a card or CPU mode only counts under its requirements; a size counts when the sentence says it's
     // needed ("at least 8 GB of RAM") wherever it is.
     const listed = source === readmePath || hwDocs.includes(source) || GUIDE_HEADING.test(heading) || /^(system )?requirements?\s*:/i.test(s);

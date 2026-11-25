@@ -27,6 +27,9 @@ data/
 *.sqlite
 *.sqlite3
 
+# Local caches (scripts/compare-manuals.ts keeps GitHub answers and its reports here)
+.cache/
+
 # Logs
 *.log
 npm-debug.log*

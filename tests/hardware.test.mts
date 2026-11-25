@@ -99,3 +99,17 @@ test("wrapped paragraphs are quoted whole; 'requires' about something else isn't
   assert.equal(h.cpuOnly?.quote, "If the GPU fails, it falls back to running on the CPU.");
   assert.equal(readme("# T\n\nThis app requires a dedicated GPU.").gpu[0].required, true);
 });
+
+test("folder tables, licenses and image captions aren't needs", () => {
+  const h = readme(`## Requirements
+- An arm64 Linux host with at least 16 GB of RAM.
+
+*The hosted desktop at the end of a stress run, rendered on the CPU (no GPU bridge).*
+
+## Repository layout and licenses
+| Path | License | What |
+| kexts/ | APSL-2.0 | The hosted system's kexts (CPU, disk, keystore, Metal accelerator, DRM bridge) |`);
+  assert.equal(h.memory[0].gb, 16);
+  assert.equal(h.gpu.length, 0, JSON.stringify(h.gpu));
+  assert.equal(h.cpuOnly, null);
+});

@@ -1,10 +1,12 @@
 import type { TreeEntry } from "./github";
+import { cpuNeed, type CpuNeed } from "./hardware";
 import { OS_LIST, adaptCommand, dockerInstall, miseInstall, pythonVenv, runtimeInstall, type OS } from "./os";
-import { COMPAT_SECTIONS, UNDO_SECTIONS, extractReadmeSection, tipsFor, toolNamed, toolsFor, type ReadmeSection } from "./readme";
+import { COMPAT_SECTIONS, UNDO_SECTIONS, extractReadmeSection, listSteps, tipsFor, toolNamed, toolsFor, type ListStep, type ReadmeSection } from "./readme";
 
 export type Item = { name: string; detail?: string; source: string };
 export type EnvVar = { name: string; example: string; secret: boolean; optional?: boolean; source: string };
-export type Step = { title: string; commands: string[]; note?: string; tips?: string[] };
+// from: "readme" when the step is the README's own commands (its numbered list, or "Follow the README").
+export type Step = { title: string; commands: string[]; note?: string; tips?: string[]; from?: "readme" };
 
 export type Analysis = {
   stacks: string[];
@@ -22,6 +24,8 @@ export type Analysis = {
   tools: string[];
   needsDevice: boolean;
   difficulty: { label: "Easy" | "Moderate" | "Involved"; score: number };
+  // The processor it says it needs ("an arm64 Linux host"), from lib/hardware.ts cpuNeed; missing on manuals read before it.
+  cpu?: CpuNeed | null;
   otherManifests: string[];
   // The project's own Python package, at the root or in a subfolder (monorepos like packages/markitdown): its
   // supported Python versions and optional extras, so "pip install name[extra]" can be explained. Missing on copies
@@ -727,7 +731,24 @@ export function analyze(
 
   // ---------- Env vars ----------
   let envVars: EnvVar[] = [];
-  const envFiles = Object.keys(files).filter((p) => ENV_EXAMPLE.test(p));
+  // The one to copy first: the plain .env.example at the root, then a sample or template, then a development one; test,
+  // CI and special-purpose ones (.env.test.example, .env.appStore.example) last, and nested ones after the root's.
+  const envRank = (p: string) => {
+    const name = p.split("/").pop()!.toLowerCase();
+    const rank = /^\.env\.example$/.test(name)
+      ? 0
+      : /^\.env\.(sample|template|dist|defaults)$|^(example|sample)\.env$|^\.env\.(local|dev|development)\.example$/.test(name)
+        ? 1 // the general one under another name, or the plain development one
+        : /\b(test|testing|ci|e2e|spec)\b/.test(name)
+          ? 5
+          : /\b(dev|development|local)\b/.test(name)
+            ? 2 // a development variant (.env.dev-azure.example)
+            : 3;
+    return rank + (p.includes("/") ? 10 : 0);
+  };
+  const envFiles = Object.keys(files)
+    .filter((p) => ENV_EXAMPLE.test(p))
+    .sort((a, b) => envRank(a) - envRank(b) || a.localeCompare(b));
   for (const p of envFiles) envVars.push(...parseEnv(files[p], p));
   envVars = dedupe(envVars, (e) => e.name);
   for (const e of envVars) {
@@ -774,7 +795,10 @@ export function analyze(
   if (!dockerOnly && ffmpegDep && !hasFfmpeg())
     hints.push(`Some features may need FFmpeg (${ffmpegDep} uses it): ${Object.values(ffmpeg?.install ?? {}).length ? "brew install ffmpeg, winget install Gyan.FFmpeg or sudo apt install ffmpeg" : "install it from ffmpeg.org"}.`);
   const shellScripts = allPaths.filter((p) => /\.sh$/.test(p) && !p.includes("node_modules"));
-  const runsShellScripts = readmeCmds.some((c) => /\.sh\b/.test(c));
+  // The README's setup written as a numbered list of inline commands ("1. `scripts/build.sh` (on the host): builds
+  // it"), used only when nothing else gave steps: no code blocks there, no install or run commands found.
+  const listed: ListStep[] = readme && !readmeCmds.length && !installCmds.length && !runCmds.length ? listSteps(readme.markdown) : [];
+  const runsShellScripts = readmeCmds.some((c) => /\.sh\b/.test(c)) || listed.some((l) => /\.sh\b/.test(l.command));
   if (!stacks.length && shellScripts.length) stacks.push("Shell scripts");
   if (has("AGENTS.md") || has("CLAUDE.md")) {
     hints.push(`Has ${has("AGENTS.md") ? "AGENTS.md" : "CLAUDE.md"} — instructions for coding agents. You can open Claude Code (or another agent) in the cloned folder and ask it to do the setup for you.`);
@@ -785,6 +809,21 @@ export function analyze(
   // adb/fastboot means the project acts on a phone, tablet or TV that the user has to prepare.
   const needsDevice = tools.some((t) => t.name.startsWith("adb"));
   if (needsDevice) hints.unshift("You need the device itself (phone, tablet or TV) on the same network as your computer, with ADB debugging turned on.");
+  // A kernel module (insmod, dkms, a .ko file): root access, headers for the exact running kernel, and Secure Boot in the
+  // way. As hard as setup gets, whatever the stack looks like.
+  // Strong signals only: a module file is "xnu.ko", not a Korean README ("README.ko.md") or a link to ko-fi.com, and a
+  // bare "kernel module" can be anything (a prompt about one, a feature list).
+  // Read from the setup itself (the README's setup section and the commands), not the whole README: documentation and
+  // dotfiles mention modprobe or dkms in passing.
+  const kernelModule = /\b(insmod|modprobe|dkms)\b|\b[\w-]+\.ko(?![\w.-])|\b(loadable|out-of-tree) (kernel )?modules?\b/i.test(
+    [readme?.markdown ?? "", ...readmeCmds, ...listed.map((l) => l.command), ...installCmds, ...runCmds].join("\n"),
+  );
+  if (kernelModule)
+    hints.unshift("It loads a kernel module: you need root access and the headers for your exact kernel, and Secure Boot may refuse an unsigned module.");
+  // Steps that say which machine they run on ("on the Mac", "on the Linux host"): more than one machine is involved.
+  const machineOf = (l: ListStep) => l.where?.match(/\bon (?:the |your |an? )?([\w\s-]{2,40}?)(?:,|$)/i)?.[1].trim();
+  const machines = [...new Map(listed.map(machineOf).filter((m): m is string => Boolean(m)).map((m) => [m.toLowerCase(), m])).values()];
+  if (machines.length >= 2) hints.unshift(`The README's steps run on more than one machine: ${machines.map((m) => `the ${m}`).join(" and ")}.`);
 
   // ---------- Steps (per OS) ----------
   const uniqServices = dedupe(services, (s) => s.name);
@@ -884,10 +923,28 @@ export function analyze(
       });
     }
     if (testCmds.length) steps.push({ title: "Run the tests", commands: adapt(testCmds) });
+    // Each item of the README's numbered list, in its order, quoted (lib/readme.ts listSteps).
+    listed.forEach((l, i) => {
+      const cmd = /^[\w.-]+(\/[\w.-]+)*\.(sh|bash)(\s|$)/.test(l.command) ? `bash ${l.command}` : /^[\w-]+\/[\w./-]+$/.test(l.command) ? `./${l.command}` : l.command;
+      // The title: the item's words up to a natural break, without code marks; the note keeps them all.
+      let first = l.text.replace(/`/g, "").split(/(?<=[.;:])\s|\s\(/)[0].replace(/[.;:]$/, "");
+      const comma = first.indexOf(", ");
+      if (comma >= 30 && comma <= 70) first = first.slice(0, comma);
+      if (first.length > 80) first = `${first.slice(0, 80).replace(/\s+\S*$/, "")}…`;
+      const title = first.length >= 8 ? first[0].toUpperCase() + first.slice(1) : `README step ${i + 1}`;
+      const where = l.where ? `${l.where[0].toUpperCase()}${l.where.slice(1)}.` : null;
+      steps.push({
+        title,
+        commands: [cmd],
+        note: [where, `From the README: ${l.text || "run this."}`].filter(Boolean).join(" "),
+        from: "readme",
+      });
+    });
     if (useReadmeSteps) {
       steps.push({
         title: `Follow the README: ${readme!.heading}`,
         commands: readmeCmds,
+        from: "readme",
         tips: tipsFor(readmeCmds),
         note:
           os === "windows" && runsShellScripts
@@ -914,7 +971,10 @@ export function analyze(
     (hints.some((h) => h.startsWith("Monorepo")) ? 1 : 0) +
     tools.length +
     (needsDevice ? 2 : 0) +
-    (runCmds.length || testCmds.length || useReadmeSteps ? 0 : 2);
+    (kernelModule ? 7 : 0) + // on its own enough for "Involved"
+    (machines.length >= 2 ? 2 : 0) +
+    (listed.length >= 4 ? 1 : 0) +
+    (runCmds.length || testCmds.length || useReadmeSteps || listed.length ? 0 : 2);
   const label = score <= 2 ? "Easy" : score <= 6 ? "Moderate" : "Involved";
 
   const otherManifests = (opts.treePaths ?? allPaths)
@@ -937,6 +997,7 @@ export function analyze(
     tools: tools.map((t) => t.name),
     needsDevice,
     difficulty: { label, score },
+    cpu: cpuNeed(files),
     otherManifests,
     pythonPackage: pythonPackageOf(files, repo.repo),
   };

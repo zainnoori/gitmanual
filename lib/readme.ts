@@ -48,7 +48,8 @@ export function extractReadmeSection(
     const body = lines.slice(h.line + 1, next ? next.line : undefined).join("\n").trim();
     const commands = commandsFrom(body);
     // A heading with no commands and little text is usually a table-of-contents stub.
-    if (opts.requireCommands && !commands.length && body.length < 200) continue;
+    // A numbered list of inline commands (listSteps) is the setup itself, however short.
+    if (opts.requireCommands && !commands.length && body.length < 200 && !listSteps(body).length) continue;
     if (!opts.requireCommands && body.length < 40) continue;
     return { heading: h.text, markdown: truncate(body, 5000), commands };
   }
@@ -65,6 +66,54 @@ export function commandsFrom(markdown: string): string[] {
     }
   }
   return out;
+}
+
+// A setup section written as a numbered list with the command inline instead of in code blocks:
+//   1. `scripts/build.sh` (on the Linux host, once): sets up the toolchain and builds it.
+//   2. `make install`: installs it.
+// Each item becomes a step: its command, and its words as the title and note. Only for a list that's clearly a
+// sequence of commands (at least two items that start with one), so a feature list or an FAQ never turns into steps.
+export type ListStep = { command: string; text: string; where: string | null };
+
+const CMD_START = /^(\.{0,2}\/|scripts?\/|bin\/|tools\/|[\w.-]+\/[\w./-]+\.(sh|bash|ps1|py|command)\b|[\w.-]+\.(sh|bash|ps1|command)\b|(sudo|make|cmake|ninja|meson|cargo|go|npm|npx|pnpm|yarn|bun|pip3?|pipx|uv|python3?|node|docker|podman|brew|apt(-get)?|dnf|pacman|git|bash|sh|zsh|just|task|mvn|gradle|\.\/gradlew|dotnet|swift|xcodebuild|flutter|insmod|modprobe|dkms|systemctl)\b)/;
+
+const plainText = (s: string) =>
+  s
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+export function listSteps(markdown: string): ListStep[] {
+  const text = markdown.replace(/```[\s\S]*?```/g, "");
+  const items: string[] = [];
+  let cur: string | null = null;
+  for (const line of text.split("\n")) {
+    const m = /^\s{0,3}\d+[.)]\s+(.*)$/.exec(line);
+    if (m) {
+      if (cur !== null) items.push(cur);
+      cur = m[1];
+    } else if (cur !== null && /^\s{2,}\S/.test(line)) cur += ` ${line.trim()}`; // the item goes on, indented
+    else if (cur !== null && line.trim()) {
+      items.push(cur);
+      cur = null;
+    }
+  }
+  if (cur !== null) items.push(cur);
+
+  const steps: ListStep[] = [];
+  for (const item of items) {
+    // The command is the inline code the item starts with (allowing "Run " before it).
+    const m = /^(?:(?:run|then|next|finally|first)[:,]?\s+)?`([^`]{2,200})`\s*(.*)$/i.exec(item.trim());
+    if (!m || !CMD_START.test(m[1].trim())) continue;
+    const rest = m[2].replace(/^[,:;—–-]\s*/, "");
+    // "(on the Mac)", "(on the arm64 Linux host, once)": which machine it runs on, kept for the note.
+    const where = /^\(([^)]{3,80})\)\s*:?\s*/.exec(rest);
+    const words = plainText(where ? rest.slice(where[0].length) : rest).replace(/^[,:;—–-]\s*/, "");
+    steps.push({ command: m[1].trim(), text: words, where: where ? where[1].trim() : null });
+  }
+  return steps.length >= 2 ? steps : [];
 }
 
 function truncate(s: string, n: number): string {

@@ -708,7 +708,7 @@ function Report({
                   </button>
                 </p>
               )}
-              <RepoScript meta={meta} guides={guides} os={os} />
+              <RepoScript meta={meta} guides={guides} os={os} used={steps.flatMap((s) => [...s.commands, s.note ?? ""]).join("\n")} />
               {guides.doc && (
                 <details className="panel guide-doc" id="maintainer-guide" open={steps.length <= 3}>
                   <summary>
@@ -2163,8 +2163,11 @@ function StartHere({
 }
 
 // The setup or launch script the maintainers ship, at the top of "Build from source", where it gets used.
-function RepoScript({ meta, guides, os }: { meta: Result["meta"]; guides: Guides; os: OS }) {
-  const scripts = guides.scripts.filter((s) => s.windows === (os === "windows")).concat(guides.scripts.filter((s) => s.windows !== (os === "windows")));
+// used: the steps' commands and notes. A script the steps already run or mention (the README's own order put it there)
+// isn't offered again as "the" setup script.
+function RepoScript({ meta, guides, os, used }: { meta: Result["meta"]; guides: Guides; os: OS; used: string }) {
+  const fresh = guides.scripts.filter((s) => !used.includes(s.path));
+  const scripts = fresh.filter((s) => s.windows === (os === "windows")).concat(fresh.filter((s) => s.windows !== (os === "windows")));
   if (!scripts.length) return null;
   return (
     <div className="start-script">
