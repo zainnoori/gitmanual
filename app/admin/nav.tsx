@@ -8,6 +8,7 @@ const PAGES = [
   { id: "repos", href: "/admin/repos", label: "Repos" },
   { id: "chat", href: "/admin/chat", label: "Chat" },
   { id: "keys", href: "/admin/keys", label: "API keys" },
+  { id: "sponsors", href: "/admin/sponsors", label: "Sponsors" },
   { id: "advertise", href: "/admin/advertise", label: "Advertise" },
   { id: "health", href: "/admin/health", label: "Health" },
 ] as const;

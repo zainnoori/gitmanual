@@ -206,6 +206,20 @@ const SCHEMA = `
     v TEXT NOT NULL,                -- JSON, edited on /admin
     updated_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS sponsors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    text TEXT NOT NULL,             -- the one line shown under the image
+    url TEXT NOT NULL,              -- where a click goes (https), with the advertiser's own UTM tags
+    package TEXT NOT NULL,          -- shared (takes turns with Carbon) | exclusive (the only ad)
+    starts_on TEXT NOT NULL,        -- YYYY-MM-DD, UTC, first day shown
+    ends_on TEXT NOT NULL,          -- YYYY-MM-DD, UTC, last day shown
+    image TEXT,                     -- base64 of the uploaded picture (PNG, JPEG or WebP), served from /api/sponsor/image
+    image_type TEXT,
+    clicks INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS inspection_snapshots (
     key TEXT NOT NULL,              -- lower-case owner/repo
     scanned_at INTEGER NOT NULL,
@@ -220,7 +234,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 12; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks, 10: repo_gone, 11: repo_summaries, 12: site_settings
+const SCHEMA_VERSION = 13; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks, 10: repo_gone, 11: repo_summaries, 12: site_settings, 13: sponsors
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -1847,4 +1861,110 @@ export async function setSetting(k: string, v: unknown): Promise<void> {
       args: [k, JSON.stringify(v), Date.now()],
     }),
   );
+}
+
+// ---- Sponsors: direct-sold ads in the ad slot (app/carbon.tsx), booked on /admin/sponsors ----
+
+export type Sponsor = {
+  id: number;
+  name: string;
+  text: string;
+  url: string;
+  package: "shared" | "exclusive";
+  startsOn: string;
+  endsOn: string;
+  hasImage: boolean;
+  clicks: number;
+  updatedAt: number;
+};
+
+const SPONSOR_COLS = "id, name, text, url, package, starts_on, ends_on, image IS NOT NULL AS has_image, clicks, updated_at";
+const toSponsor = (r: Record<string, unknown>): Sponsor => ({
+  id: Number(r.id),
+  name: String(r.name),
+  text: String(r.text),
+  url: String(r.url),
+  package: r.package === "exclusive" ? "exclusive" : "shared",
+  startsOn: String(r.starts_on),
+  endsOn: String(r.ends_on),
+  hasImage: Boolean(Number(r.has_image)),
+  clicks: Number(r.clicks),
+  updatedAt: Number(r.updated_at),
+});
+
+export async function listSponsors(): Promise<Sponsor[]> {
+  return strictly(async (c) => (await c.execute(`SELECT ${SPONSOR_COLS} FROM sponsors ORDER BY starts_on DESC, id DESC`)).rows.map(toSponsor));
+}
+
+// The booking running on a day (YYYY-MM-DD, UTC), if any. Quietly null when the table isn't there yet.
+export async function activeSponsor(day: string): Promise<Sponsor | null> {
+  return safely(null, async (c) => {
+    const rows = await c
+      .execute({ sql: `SELECT ${SPONSOR_COLS} FROM sponsors WHERE starts_on <= ? AND ends_on >= ? ORDER BY package = 'exclusive' DESC, id LIMIT 1`, args: [day, day] })
+      .then((r) => r.rows, () => []);
+    return rows.length ? toSponsor(rows[0]) : null;
+  });
+}
+
+// Another booking whose dates overlap these, so two never run at once.
+export async function sponsorOverlap(startsOn: string, endsOn: string, exceptId: number | null): Promise<Sponsor | null> {
+  return strictly(async (c) => {
+    const { rows } = await c.execute({
+      sql: `SELECT ${SPONSOR_COLS} FROM sponsors WHERE starts_on <= ? AND ends_on >= ? AND id != ? LIMIT 1`,
+      args: [endsOn, startsOn, exceptId ?? -1],
+    });
+    return rows.length ? toSponsor(rows[0]) : null;
+  });
+}
+
+export type SponsorInput = { name: string; text: string; url: string; package: "shared" | "exclusive"; startsOn: string; endsOn: string; image?: { data: string; type: string } | null };
+
+// Adds a booking (no id) or changes one. image: undefined keeps the current picture, null removes it.
+export async function saveSponsor(id: number | null, s: SponsorInput): Promise<number> {
+  return strictly(async (c) => {
+    const now = Date.now();
+    const base = [s.name, s.text, s.url, s.package, s.startsOn, s.endsOn];
+    if (id == null) {
+      const r = await c.execute({
+        sql: "INSERT INTO sponsors (name, text, url, package, starts_on, ends_on, image, image_type, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        args: [...base, s.image?.data ?? null, s.image?.type ?? null, now, now],
+      });
+      return Number(r.lastInsertRowid);
+    }
+    if (s.image === undefined)
+      await c.execute({ sql: "UPDATE sponsors SET name = ?, text = ?, url = ?, package = ?, starts_on = ?, ends_on = ?, updated_at = ? WHERE id = ?", args: [...base, now, id] });
+    else
+      await c.execute({
+        sql: "UPDATE sponsors SET name = ?, text = ?, url = ?, package = ?, starts_on = ?, ends_on = ?, image = ?, image_type = ?, updated_at = ? WHERE id = ?",
+        args: [...base, s.image?.data ?? null, s.image?.type ?? null, now, id],
+      });
+    return id;
+  });
+}
+
+export async function deleteSponsor(id: number): Promise<void> {
+  await strictly((c) => c.execute({ sql: "DELETE FROM sponsors WHERE id = ?", args: [id] }));
+}
+
+export async function sponsorImage(id: number): Promise<{ data: string; type: string } | null> {
+  return safely(null, async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT image, image_type FROM sponsors WHERE id = ? AND image IS NOT NULL", args: [id] });
+    return rows.length ? { data: String(rows[0].image), type: String(rows[0].image_type) } : null;
+  });
+}
+
+// Counts a click and returns where it goes; null for an unknown booking.
+export async function sponsorClick(id: number): Promise<string | null> {
+  return safely(null, async (c) => {
+    const { rows } = await c.execute({ sql: "UPDATE sponsors SET clicks = clicks + 1 WHERE id = ? RETURNING url", args: [id] });
+    return rows.length ? String(rows[0].url) : null;
+  });
+}
+
+// Where a click goes, without counting it (bots and link previews).
+export async function sponsorUrl(id: number): Promise<string | null> {
+  return safely(null, async (c) => {
+    const { rows } = await c.execute({ sql: "SELECT url FROM sponsors WHERE id = ?", args: [id] });
+    return rows.length ? String(rows[0].url) : null;
+  });
 }
