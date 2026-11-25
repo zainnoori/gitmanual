@@ -201,6 +201,11 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS saves_key ON saves (key);
   CREATE INDEX IF NOT EXISTS saves_day ON saves (saved_at);
+  CREATE TABLE IF NOT EXISTS site_settings (
+    k TEXT PRIMARY KEY,             -- e.g. "advertise"
+    v TEXT NOT NULL,                -- JSON, edited on /admin
+    updated_at INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS inspection_snapshots (
     key TEXT NOT NULL,              -- lower-case owner/repo
     scanned_at INTEGER NOT NULL,
@@ -215,7 +220,7 @@ const store = globalThis as typeof globalThis & { gitmanualDb?: Promise<Client |
 
 const DB_TIMEOUT_MS = 15_000;
 // Bump when SCHEMA, the added columns or the indexes below change, so the next start runs the setup once.
-const SCHEMA_VERSION = 11; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks, 10: repo_gone, 11: repo_summaries
+const SCHEMA_VERSION = 12; // 2: purchases, 3: problems, 4: problems.page, 5: problems.mode and name (the contact form), 6: cleanup indexes, no repos_stars, 7: fb_posts_list, 8: email_log, 9: health_marks, 10: repo_gone, 11: repo_summaries, 12: site_settings
 
 function db(): Promise<Client | null> {
   store.gitmanualDb ??= (async () => {
@@ -1820,4 +1825,26 @@ export async function chatUsageFor(githubId: number, now = Date.now()): Promise<
       repos: repos.rows.map((r) => ({ repo: String(r.repo), answers: Number(r.n) })),
     };
   });
+}
+
+// Small site settings edited on /admin (JSON per key), e.g. the numbers on /advertise. null when unset or unreadable.
+export async function getSetting<T>(k: string): Promise<T | null> {
+  return safely(null, async (c) => {
+    // Quietly null while the table doesn't exist yet (a server started before SCHEMA_VERSION 12) or the JSON is bad.
+    const rows = await c.execute({ sql: "SELECT v FROM site_settings WHERE k = ?", args: [k] }).then((r) => r.rows, () => []);
+    try {
+      return rows.length ? (JSON.parse(String(rows[0].v)) as T) : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+export async function setSetting(k: string, v: unknown): Promise<void> {
+  await strictly((c) =>
+    c.execute({
+      sql: "INSERT INTO site_settings (k, v, updated_at) VALUES (?, ?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v, updated_at = excluded.updated_at",
+      args: [k, JSON.stringify(v), Date.now()],
+    }),
+  );
 }

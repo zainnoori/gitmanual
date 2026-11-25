@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { AD_FREE_COOKIE, REPO_URL } from "@/lib/site";
-import { openContact } from "./report-problem";
+import Link from "next/link";
 import { Logo } from "./ui";
 
 // One Carbon ad (cover format) where it's placed: manual pages of public repos, the shelf, lists and /developers.
@@ -144,9 +144,9 @@ function AdFallback({ className }: { className: string }) {
         )}
       </div>
       {contact && (
-        <button type="button" className="ad-advertise" onClick={() => openContact("advertising")}>
+        <Link className="ad-advertise" href="/advertise">
           Want to advertise here?
-        </button>
+        </Link>
       )}
     </aside>
   );

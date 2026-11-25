@@ -23,7 +23,7 @@ const money = (cents: number, currency: string) =>
 const date = (ms: number) => new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
 
 // "/owner/name/…" → "owner/name", for pages that are a repo's (not /shelf, /lists, …).
-const NOT_REPOS = new Set(["about", "admin", "api", "contact", "developers", "finds", "go", "how-it-works", "lists", "mcp", "privacy", "private", "pro", "profile", "shelf", "terms"]);
+const NOT_REPOS = new Set(["about", "admin", "advertise", "api", "contact", "developers", "finds", "go", "how-it-works", "lists", "mcp", "privacy", "private", "pro", "profile", "shelf", "terms"]);
 function repoOf(path: string | null): string | null {
   const m = path?.match(/^\/([\w.-]+)\/([\w.-]+)/);
   return m && !NOT_REPOS.has(m[1].toLowerCase()) ? `${m[1]}/${m[2]}` : null;

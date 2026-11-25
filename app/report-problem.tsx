@@ -18,7 +18,15 @@ export const openContact = (kind?: ProblemKind) => window.dispatchEvent(new Cust
 const KINDS = { manual: PROBLEM_KINDS, site: SITE_KINDS, contact: CONTACT_KINDS };
 const FIRST: Record<FormMode, ProblemKind> = { manual: "step", site: "site", contact: "question" };
 
-export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: FormMode; manual?: Manual; kind?: ProblemKind; onDone?: () => void }) {
+// Marks a required field. The input's own `required` tells screen readers, so the star is hidden from them.
+const Req = () => (
+  <span className="rp-req" aria-hidden="true">
+    *
+  </span>
+);
+
+// `only`: the form is for that one topic (e.g. /advertise), so the topic picker is left out.
+export function ProblemForm({ mode, manual, kind: startKind, only, onDone }: { mode: FormMode; manual?: Manual; kind?: ProblemKind; only?: boolean; onDone?: () => void }) {
   const id = useId();
   const [kind, setKind] = useState<ProblemKind>(startKind ?? FIRST[mode]);
   const [name, setName] = useState(""); // contact: how to address them
@@ -99,7 +107,8 @@ export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: F
 
   return (
     <form className="rp-body" onSubmit={send}>
-      <fieldset className="rp-kinds">
+      {!only && (
+        <fieldset className="rp-kinds">
         <legend>{mode === "contact" ? "What's it about?" : "What happened?"}</legend>
         {KINDS[mode].map((k) => (
           <label key={k.id} className={kind === k.id ? "on" : ""}>
@@ -108,6 +117,7 @@ export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: F
           </label>
         ))}
       </fieldset>
+      )}
 
       {withSteps && (
         <label className="rp-field">
@@ -133,7 +143,10 @@ export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: F
       )}
 
       <label className="rp-field">
-        <span>{mode === "contact" || kind === "question" ? (kind === "question" ? "Your question" : "Your message") : "What went wrong?"}</span>
+        <span>
+          {mode === "contact" || kind === "question" ? (kind === "question" ? "Your question" : "Your message") : "What went wrong?"}
+          <Req />
+        </span>
         <textarea
           required
           minLength={5}
@@ -185,7 +198,8 @@ export function ProblemForm({ mode, manual, kind: startKind, onDone }: { mode: F
         )}
         <label className="rp-field">
           <span>
-            Your email{" "}
+            Your email
+            <Req />{" "}
             <small>
               {kind === "payment" ? "the one you paid with, so we can reply" : "so we can reply, never shared"}
             </small>

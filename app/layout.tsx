@@ -101,6 +101,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <Link href="/how-it-works">How it works</Link>
               <Link href="/developers">API &amp; MCP</Link>
               {PRO && <Link href="/pro">GitManual Pro</Link>}
+              <Link href="/advertise">Advertise</Link>
               {EXTENSION_URL && (
                 // Google's own badge, unchanged except for size (its branding rules), linked to the store page.
                 <a className="footer-badge" href={EXTENSION_URL} target="_blank" rel="noreferrer">

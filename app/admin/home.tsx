@@ -17,7 +17,7 @@ const ago = (ms: number) => {
 };
 
 export function AdminHome() {
-  const [o, setO] = useState<AdminOverview | null>(null);
+  const [o, setO] = useState<(AdminOverview & { advertiseChecked?: string | null; advertiseSite?: number }) | null>(null);
   const [error, setError] = useState<"denied" | string | null>(null);
 
   useEffect(() => {
@@ -46,6 +46,13 @@ export function AdminHome() {
     { label: "Users", value: o.users.toLocaleString(), sub: `${o.newUsers7d} new in 7 days`, href: "/admin/users" },
     { label: "Emails sent, 7 days", value: String(o.emails7d), href: "/admin/email" },
     { label: "Chat spend today", value: `$${o.chatSpendToday.toFixed(2)}`, sub: "UTC day", href: "/admin/chat" },
+    {
+      label: "Site analytics on /advertise",
+      value: o.advertiseSite ? "Edit" : "Add",
+      sub: o.advertiseSite ? `Checked ${o.advertiseChecked ?? "—"}` : "Not shown yet: add your Vercel numbers",
+      href: "/admin/advertise",
+      hot: !o.advertiseSite,
+    },
   ];
 
   return (

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { savedAdStats } from "@/lib/advertise-store";
 import { adminOverview } from "@/lib/db";
 import { isAdmin, viewer } from "@/lib/viewer";
 
@@ -9,7 +10,8 @@ export async function GET() {
   const { user } = await viewer();
   if (!user || !isAdmin(user.login)) return NextResponse.json({ error: "Admins only." }, { status: 403, headers: NO_STORE });
   try {
-    return NextResponse.json(await adminOverview(), { headers: NO_STORE });
+    const [overview, ads] = await Promise.all([adminOverview(), savedAdStats()]);
+    return NextResponse.json({ ...overview, advertiseChecked: ads.updated, advertiseSite: ads.site.length }, { headers: NO_STORE });
   } catch {
     return NextResponse.json({ error: "The database didn't answer. Try again in a minute." }, { status: 503, headers: NO_STORE });
   }
